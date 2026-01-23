@@ -1,0 +1,15 @@
+# frontend
+front/node_modules/
+front/dist/
+
+# backend
+back/venv/
+back/uploads/
+back/output/
+__pycache__/
+
+# env
+.env
+
+# editor
+.vscode/
