@@ -1,7 +1,7 @@
 ﻿
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
-const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000";
+const API_BASE = import.meta.env.VITE_API_BASE || "";
 const LS_KEY = "cis_expense_data_v2";
 const LS_LANG = "cis_ui_lang";
 
