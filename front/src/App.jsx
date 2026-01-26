@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 const API_BASE = import.meta.env.VITE_API_BASE || "";
 const LS_KEY = "cis_expense_data_v2";
 const LS_LANG = "cis_ui_lang";
+const MOBILE_BREAKPOINT = 640;
 
 const RECIPIENT_JINMO = "이진모";
 const RECIPIENT_JIMIN = "박지민";
@@ -29,6 +30,15 @@ const COUNTRY_CURRENCY = {
   UZB: "сум",
   UKR: "гривна"
 };
+
+const DESCRIPTION_PRESETS_KO = [
+  "기타",
+  "CIS지역 - 버니 서버이용료 - 월",
+  "영어지역 - 버니 서버이용료- 월",
+  "스페인지역 - 버니 서버이용료- 월",
+  "카마테라 - 전도사이트 호스팅료- 월",
+  "배알리나 숙소비 - 월"
+];
 
 const i18n = {
   ko: {
@@ -59,17 +69,19 @@ const i18n = {
     guideLine4: "4) 금액/날짜가 틀리면 직접 고쳐요.",
     guideLine5: "5) 모두 끝나면 [문서 생성]을 눌러요.",
     detailTitle: "상세 편집",
+    descriptionPresetLabel: "상세 내용 선택",
     emptyStateNoSelection: "좌측에서 항목을 선택하거나 새 항목을 추가해주세요.",
     fieldDescription: "상세 내용 *",
     phDescription: "예: 서버 사용료",
     fieldDate: "영수증 일자 *",
     fieldManagerName: "담당자 이름",
     fieldTelegramId: "텔레그램 ID",
-    fieldRecipientType: "수령인 구분 *",
+    fieldRecipientType: "수령인 *",
     recipientJinmo: "이진모",
     recipientJimin: "박지민",
     recipientOther: "기타",
-    fieldRecipientName: "수령인명 *",
+    fieldRecipientName: "예금자명 *",
+    fieldRecipientNameHelp: "실제 통장 계좌의 예금자명을 정확히 기록해야 합니다.",
     phRecipientName: "예: 홍길동",
     fieldBank: "은행 *",
     phBank: "예: 국민",
@@ -79,6 +91,7 @@ const i18n = {
     btnAddReceipt: "영수증 추가",
     dropzoneText: "여기에 드래그앤드롭 / 또는 Ctrl+V로 이미지 붙여넣기",
     btnSaveItem: "저장",
+    btnBackList: "목록으로",
     spinnerOcr: "OCR 처리 중...",
     noItemsInTable: "등록된 항목이 없습니다. 새 항목을 추가해주세요.",
     badgeIncomplete: "미완료",
@@ -135,7 +148,6 @@ const i18n = {
     langLabel: "Язык",
     langKo: "Корейский",
     langRu: "Русский",
-    naturalTranslationLabel: "Естественный перевод на корейский",
     summaryTitle: "Сводка",
     summaryTotalItemsLabel: "Всего пунктов",
     summaryGrandTotalLabel: "Итоговая сумма",
@@ -177,6 +189,7 @@ const i18n = {
     btnAddReceipt: "Добавить квитанцию",
     dropzoneText: "Перетащите сюда / или вставьте Ctrl+V",
     btnSaveItem: "Сохранить",
+    btnBackList: "К списку",
     spinnerOcr: "OCR в процессе...",
     noItemsInTable: "Пока нет пунктов. Добавьте новый.",
     badgeIncomplete: "Не заполнено",
@@ -393,6 +406,8 @@ function App() {
   const [currentEditingItemId, setCurrentEditingItemId] = useState(null);
   const [lang, setLang] = useState("ko");
   const [naturalTranslation, setNaturalTranslation] = useState(true);
+  const [isMobile, setIsMobile] = useState(false);
+  const [viewMode, setViewMode] = useState("list");
   const [serverInfo, setServerInfo] = useState({
     state: "checking",
     ready: false,
@@ -410,6 +425,24 @@ function App() {
   useEffect(() => {
     currentEditingIdRef.current = currentEditingItemId;
   }, [currentEditingItemId]);
+
+  useEffect(() => {
+    const mql = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT}px)`);
+    const update = () => setIsMobile(mql.matches);
+    update();
+    if (mql.addEventListener) {
+      mql.addEventListener("change", update);
+    } else {
+      mql.addListener(update);
+    }
+    return () => {
+      if (mql.removeEventListener) {
+        mql.removeEventListener("change", update);
+      } else {
+        mql.removeListener(update);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     console.log("React app loaded: ocr-mapping-v3");
@@ -480,6 +513,11 @@ function App() {
       setCurrentEditingItemId(null);
     }
   }, [items, currentEditingItemId]);
+
+  useEffect(() => {
+    if (!isMobile) return;
+    setViewMode(currentEditingItemId ? "editor" : "list");
+  }, [isMobile, currentEditingItemId]);
 
   useEffect(() => {
     let mounted = true;
@@ -571,11 +609,13 @@ function App() {
     setItems((prev) => [...prev, it]);
     setCurrentEditingItemId(it.id);
     setEditorErrors([]);
+    if (isMobile) setViewMode("editor");
   }
 
   function openEditor(itemId) {
     setCurrentEditingItemId(itemId);
     setEditorErrors([]);
+    if (isMobile) setViewMode("editor");
   }
 
   function deleteItem(itemId) {
@@ -908,6 +948,18 @@ function App() {
     }
     setCurrentEditingItemId(null);
     setEditorErrors([]);
+    if (isMobile) setViewMode("list");
+  }
+
+  function handleDescriptionPresetChange(value) {
+    if (!currentItem) return;
+    if (value === "기타") {
+      updateItemField(currentItem.id, "description", "");
+      return;
+    }
+    if (value) {
+      updateItemField(currentItem.id, "description", value);
+    }
   }
 
   function toggleOcr(itemId, receiptId) {
@@ -929,16 +981,6 @@ function App() {
         <div className="brand">{tr("brandTitle")}</div>
         <div className="topbar-right">
           <div className="server">{serverInfoText()}</div>
-          {lang === "ru" && (
-            <label className="natural-translate">
-              <input
-                type="checkbox"
-                checked={naturalTranslation}
-                onChange={(e) => setNaturalTranslation(e.target.checked)}
-              />
-              {tr("naturalTranslationLabel")}
-            </label>
-          )}
           <div className="lang-select">
             <label className="lang-label" htmlFor="langSelect">
               {tr("langLabel")}
@@ -956,119 +998,154 @@ function App() {
       </header>
 
       <main className="layout">
-        <section className="panel left">
-          <div className="panel-title">{tr("summaryTitle")}</div>
+        {(!isMobile || viewMode === "list") && (
+          <section className="panel left">
+            <div className="panel-title">{tr("summaryTitle")}</div>
 
-          <div className="summary">
-            <div>
-              {tr("summaryTotalItemsLabel")}: <b>{totalItems}</b>
+            <div className="summary">
+              <div>
+                {tr("summaryTotalItemsLabel")}: <b>{totalItems}</b>
+              </div>
+              <div>
+                {tr("summaryGrandTotalLabel")}: <b>{formatNumber(grandTotal)}</b>
+                {lang === "ru" ? currencyLabel || "" : tr("currencyWon")}
+              </div>
             </div>
-            <div>
-              {tr("summaryGrandTotalLabel")}: <b>{formatNumber(grandTotal)}</b>
-              {lang === "ru" ? currencyLabel || "" : tr("currencyWon")}
-            </div>
-          </div>
 
-          <table className="items-table">
-            <thead>
-              <tr>
-                <th style={{ width: "60px" }}>{tr("tableHeaderIndex")}</th>
-                <th>{tr("tableHeaderContent")}</th>
-                <th style={{ width: "120px" }}>{tr("tableHeaderAmount")}</th>
-                <th style={{ width: "140px" }}>{tr("tableHeaderActions")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.length === 0 ? (
+            <table className="items-table">
+              <thead>
                 <tr>
-                  <td colSpan="4" style={{ textAlign: "center", color: "#6b7280", padding: "24px" }}>
-                    {tr("noItemsInTable")}
-                  </td>
+                  <th style={{ width: "60px" }}>{tr("tableHeaderIndex")}</th>
+                  <th>{tr("tableHeaderContent")}</th>
+                  <th style={{ width: "120px" }}>{tr("tableHeaderAmount")}</th>
+                  <th style={{ width: "140px" }}>{tr("tableHeaderActions")}</th>
                 </tr>
-              ) : (
-                items.map((it, idx) => {
-                  const complete = isItemComplete(it, lang);
-                  const selected = currentEditingItemId === it.id;
-                  return (
-                    <tr
-                      key={it.id}
-                      onClick={() => openEditor(it.id)}
-                      style={selected ? { background: "#f8fafc" } : null}
+              </thead>
+              <tbody>
+                {items.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan="4"
+                      style={{ textAlign: "center", color: "#6b7280", padding: "24px" }}
                     >
-                      <td>{idx + 1}</td>
-                      <td>
-                        {it.description?.trim() ? it.description : `(${tr("descDraft")})`}
-                        {complete ? (
-                          <span className="badge ok">{tr("badgeComplete")}</span>
-                        ) : (
-                          <span className="badge warn">{tr("badgeIncomplete")}</span>
-                        )}
-                      </td>
-                      <td>{formatNumber(it.totalAmount || 0)}</td>
-                      <td>
-                        <button
-                          className="btn"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            openEditor(it.id);
-                          }}
-                        >
-                          {tr("actionEdit")}
-                        </button>{" "}
-                        <button
-                          className="btn danger"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            deleteItem(it.id);
-                          }}
-                        >
-                          {tr("actionDelete")}
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })
+                      {tr("noItemsInTable")}
+                    </td>
+                  </tr>
+                ) : (
+                  items.map((it, idx) => {
+                    const complete = isItemComplete(it, lang);
+                    const selected = currentEditingItemId === it.id;
+                    return (
+                      <tr
+                        key={it.id}
+                        onClick={() => openEditor(it.id)}
+                        style={selected ? { background: "#f8fafc" } : null}
+                      >
+                        <td>{idx + 1}</td>
+                        <td>
+                          {it.description?.trim() ? it.description : `(${tr("descDraft")})`}
+                          {complete ? (
+                            <span className="badge ok">{tr("badgeComplete")}</span>
+                          ) : (
+                            <span className="badge warn">{tr("badgeIncomplete")}</span>
+                          )}
+                        </td>
+                        <td>{formatNumber(it.totalAmount || 0)}</td>
+                        <td>
+                          <button
+                            className="btn"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openEditor(it.id);
+                            }}
+                          >
+                            {tr("actionEdit")}
+                          </button>{" "}
+                          <button
+                            className="btn danger"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              deleteItem(it.id);
+                            }}
+                          >
+                            {tr("actionDelete")}
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+
+            <div className="left-actions">
+              <button className="btn primary" onClick={addItemAndOpen}>
+                {tr("btnAddItem")}
+              </button>
+              <button className="btn success" onClick={generateDocument}>
+                {tr("btnGenerate")}
+              </button>
+              <button className="btn" onClick={resetAll}>
+                {tr("btnReset")}
+              </button>
+            </div>
+
+            <div className="guide">
+              <div className="guide-title">{tr("guideTitle")}</div>
+              <div>{tr("guideLine1")}</div>
+              <div>{tr("guideLine2")}</div>
+              <div>{tr("guideLine3")}</div>
+              <div>{tr("guideLine4")}</div>
+              <div>{tr("guideLine5")}</div>
+            </div>
+
+            <div className="hint">
+              {tr("hintLine1")}
+              <br />
+              {tr("hintLine2")}
+              <br />
+              {tr("hintLine3")}
+            </div>
+          </section>
+        )}
+
+        {(!isMobile || viewMode === "editor") && (
+          <section className="panel right">
+            {isMobile ? (
+              <div className="mobile-editor-header">
+                <button className="btn" onClick={() => setViewMode("list")}>
+                  {tr("btnBackList")}
+                </button>
+                <div className="panel-title">{tr("detailTitle")}</div>
+              </div>
+            ) : (
+              <div className="panel-title">{tr("detailTitle")}</div>
+            )}
+
+            {!currentItem ? (
+              <div className="empty-state">{tr("emptyStateNoSelection")}</div>
+            ) : (
+              <div className="editor">
+              {lang === "ko" && (
+                <div className="field">
+                  <label>{tr("descriptionPresetLabel")}</label>
+                  <select
+                    value={
+                      DESCRIPTION_PRESETS_KO.includes(currentItem.description || "")
+                        ? currentItem.description
+                        : "기타"
+                    }
+                    onChange={(e) => handleDescriptionPresetChange(e.target.value)}
+                  >
+                    {DESCRIPTION_PRESETS_KO.map((opt) => (
+                      <option key={opt} value={opt}>
+                        {opt}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               )}
-            </tbody>
-          </table>
 
-          <div className="left-actions">
-            <button className="btn primary" onClick={addItemAndOpen}>
-              {tr("btnAddItem")}
-            </button>
-            <button className="btn success" onClick={generateDocument}>
-              {tr("btnGenerate")}
-            </button>
-            <button className="btn" onClick={resetAll}>
-              {tr("btnReset")}
-            </button>
-          </div>
-
-          <div className="guide">
-            <div className="guide-title">{tr("guideTitle")}</div>
-            <div>{tr("guideLine1")}</div>
-            <div>{tr("guideLine2")}</div>
-            <div>{tr("guideLine3")}</div>
-            <div>{tr("guideLine4")}</div>
-            <div>{tr("guideLine5")}</div>
-          </div>
-
-          <div className="hint">
-            {tr("hintLine1")}
-            <br />
-            {tr("hintLine2")}
-            <br />
-            {tr("hintLine3")}
-          </div>
-        </section>
-
-        <section className="panel right">
-          <div className="panel-title">{tr("detailTitle")}</div>
-
-          {!currentItem ? (
-            <div className="empty-state">{tr("emptyStateNoSelection")}</div>
-          ) : (
-            <div className="editor">
               <div className="field">
                 <label>{tr("fieldDescription")}</label>
                 <input
@@ -1115,27 +1192,31 @@ function App() {
                 </div>
               )}
 
-              <div className="field">
-                <label>{tr("fieldManagerName")}</label>
-                <input
-                  type="text"
-                  value={currentItem.managerName || ""}
-                  onChange={(e) =>
-                    updateItemField(currentItem.id, "managerName", e.target.value)
-                  }
-                />
-              </div>
+              {lang === "ru" && (
+                <>
+                  <div className="field">
+                    <label>{tr("fieldManagerName")}</label>
+                    <input
+                      type="text"
+                      value={currentItem.managerName || ""}
+                      onChange={(e) =>
+                        updateItemField(currentItem.id, "managerName", e.target.value)
+                      }
+                    />
+                  </div>
 
-              <div className="field">
-                <label>{tr("fieldTelegramId")}</label>
-                <input
-                  type="text"
-                  value={currentItem.telegramId || ""}
-                  onChange={(e) =>
-                    updateItemField(currentItem.id, "telegramId", e.target.value)
-                  }
-                />
-              </div>
+                  <div className="field">
+                    <label>{tr("fieldTelegramId")}</label>
+                    <input
+                      type="text"
+                      value={currentItem.telegramId || ""}
+                      onChange={(e) =>
+                        updateItemField(currentItem.id, "telegramId", e.target.value)
+                      }
+                    />
+                  </div>
+                </>
+              )}
 
               {lang !== "ru" && (
                 <div className="field">
@@ -1188,6 +1269,11 @@ function App() {
                           updateItemField(currentItem.id, "recipient", e.target.value)
                         }
                       />
+                      {lang === "ko" && currentItem.recipientType === RECIPIENT_OTHER && (
+                        <div className="field-hint error">
+                          {tr("fieldRecipientNameHelp")}
+                        </div>
+                      )}
                     </div>
                     <div className="field">
                       <label>{tr("fieldBank")}</label>
@@ -1394,9 +1480,10 @@ function App() {
                   ))}
                 </div>
               )}
-            </div>
-          )}
-        </section>
+              </div>
+            )}
+          </section>
+        )}
       </main>
 
       {modalSrc && (

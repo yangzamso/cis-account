@@ -72,6 +72,15 @@ body{
   font-weight:800;
   margin-bottom:12px;
 }
+.mobile-editor-header{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  margin-bottom:12px;
+}
+.mobile-editor-header .panel-title{
+  margin-bottom:0;
+}
 
 .summary{
   display:flex;
@@ -345,5 +354,6 @@ body{
   .left-actions{flex-direction:column}
   .right-actions{justify-content:stretch}
   .btn{width:100%}
+  .mobile-editor-header .btn{width:auto}
   .recipient-row{grid-template-columns: 1fr}
 }
