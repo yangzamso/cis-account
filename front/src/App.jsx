@@ -1,7 +1,7 @@
 ﻿
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
-const API_BASE = import.meta.env.VITE_API_BASE || "";
+const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000";
 const LS_KEY = "cis_expense_data_v2";
 const LS_LANG = "cis_ui_lang";
 const MOBILE_BREAKPOINT = 640;
@@ -247,9 +247,9 @@ function t(lang, key) {
   return i18n[lang]?.[key] ?? i18n.ko[key] ?? key;
 }
 
-function currencyLabelForItem(item, lang) {
+function currencyLabelForItem(item, lang, ruCountryCode) {
   if (lang !== "ru") return t("ko", "currencyWon");
-  const code = String(item?.countryCode || "").toUpperCase();
+  const code = String(ruCountryCode || item?.countryCode || "").toUpperCase();
   return COUNTRY_CURRENCY[code] || "";
 }
 
@@ -379,12 +379,12 @@ async function apiGenerateDocument(cleanItems, language, naturalTranslation) {
   return res.json();
 }
 
-function isItemComplete(item, lang) {
+function isItemComplete(item, lang, ruCountryCode) {
   if (!item) return false;
   if (!(item.description || "").trim()) return false;
   if (!(item.date || "").trim()) return false;
   if (lang !== "ru" && !item.recipientType) return false;
-  if (lang === "ru" && !(item.countryCode || "").trim()) return false;
+  if (lang === "ru" && !(ruCountryCode || "").trim()) return false;
   if (lang === "ru" && !(item.managerName || "").trim()) return false;
   if (!Array.isArray(item.receipts) || item.receipts.length === 0) return false;
 
@@ -408,6 +408,7 @@ function App() {
   const [naturalTranslation, setNaturalTranslation] = useState(true);
   const [isMobile, setIsMobile] = useState(false);
   const [viewMode, setViewMode] = useState("list");
+  const [ruCountryCode, setRuCountryCode] = useState("");
   const [serverInfo, setServerInfo] = useState({
     state: "checking",
     ready: false,
@@ -476,7 +477,13 @@ function App() {
               receipts
             };
           });
-          setItems(normalized);
+          const savedCountry =
+            normalized.find((it) => (it.countryCode || "").trim())?.countryCode || "";
+          const normalizedWithCountry = savedCountry
+            ? normalized.map((it) => ({ ...it, countryCode: savedCountry }))
+            : normalized;
+          setItems(normalizedWithCountry);
+          setRuCountryCode(savedCountry);
           setItemCounter(Number(parsed.itemCounter) || 0);
           setCurrentEditingItemId(parsed.currentEditingItemId ?? null);
         }
@@ -577,7 +584,7 @@ function App() {
   );
 
   const currentItem = items.find((i) => i.id === currentEditingItemId) || null;
-  const currencyLabel = currencyLabelForItem(currentItem || items[0], lang);
+  const currencyLabel = currencyLabelForItem(currentItem || items[0], lang, ruCountryCode);
   const tr = (key) => t(lang, key);
 
   function setSpinnerVisible(visible, text) {
@@ -596,7 +603,7 @@ function App() {
       recipient: "",
       bank: "",
       account: "",
-      countryCode: "",
+      countryCode: ruCountryCode || "",
       managerName: "",
       telegramId: "",
       totalAmount: 0,
@@ -635,6 +642,7 @@ function App() {
     setItemCounter(0);
     setCurrentEditingItemId(null);
     setEditorErrors([]);
+    setRuCountryCode("");
     localStorage.removeItem(LS_KEY);
   }
 
@@ -651,6 +659,12 @@ function App() {
         return next;
       })
     );
+  }
+
+  function setCountryForAll(value) {
+    const next = value || "";
+    setRuCountryCode(next);
+    setItems((prev) => prev.map((it) => ({ ...it, countryCode: next })));
   }
 
   function updateReceiptField(itemId, receiptId, field, value) {
@@ -688,7 +702,7 @@ function App() {
     if (!(item.description || "").trim()) errors.push(tr("valDescription"));
     if (!(item.date || "").trim()) errors.push(tr("valDate"));
     if (lang !== "ru" && !item.recipientType) errors.push(tr("valRecipientType"));
-    if (lang === "ru" && !(item.countryCode || "").trim()) errors.push(tr("valCountry"));
+    if (lang === "ru" && !(ruCountryCode || "").trim()) errors.push(tr("valCountry"));
     if (lang === "ru" && !(item.managerName || "").trim()) errors.push(tr("valManagerName"));
     if (!Array.isArray(item.receipts) || item.receipts.length === 0)
       errors.push(tr("valReceiptRequired"));
@@ -849,7 +863,7 @@ function App() {
     }
 
     for (const it of items) {
-      if (!isItemComplete(it, lang)) {
+      if (!isItemComplete(it, lang, ruCountryCode)) {
         setCurrentEditingItemId(it.id);
         const errors = validateCurrentItem(it);
         setEditorErrors(errors.length ? errors : [tr("msgItemIncomplete")]);
@@ -861,7 +875,7 @@ function App() {
       id: it.id,
       description: it.description || "",
       date: it.date || "",
-      countryCode: it.countryCode || "",
+      countryCode: lang === "ru" ? ruCountryCode || "" : it.countryCode || "",
       managerName: it.managerName || "",
       telegramId: it.telegramId || "",
       recipientType: it.recipientType || "",
@@ -1033,7 +1047,7 @@ function App() {
                   </tr>
                 ) : (
                   items.map((it, idx) => {
-                    const complete = isItemComplete(it, lang);
+                  const complete = isItemComplete(it, lang, ruCountryCode);
                     const selected = currentEditingItemId === it.id;
                     return (
                       <tr
@@ -1146,6 +1160,31 @@ function App() {
                 </div>
               )}
 
+              {lang === "ru" && (
+                <div className="field">
+                  <label>
+                    {tr("countryLabel")} <span className="reqmark">*</span>
+                  </label>
+                  <div className="radios">
+                    {COUNTRY_OPTIONS.map((opt) => (
+                      <label key={opt.code}>
+                        <input
+                          type="radio"
+                          name="countryCode"
+                          value={opt.code}
+                          checked={ruCountryCode === opt.code}
+                          onChange={(e) => setCountryForAll(e.target.value)}
+                        />{" "}
+                        {opt.label}
+                      </label>
+                    ))}
+                  </div>
+                  {!ruCountryCode && (
+                    <div className="field-hint error">{tr("valCountry")}</div>
+                  )}
+                </div>
+              )}
+
               <div className="field">
                 <label>{tr("fieldDescription")}</label>
                 <input
@@ -1164,33 +1203,6 @@ function App() {
                   onChange={(e) => updateItemField(currentItem.id, "date", e.target.value)}
                 />
               </div>
-
-              {lang === "ru" && (
-                <div className="field">
-                  <label>
-                    {tr("countryLabel")} <span className="reqmark">*</span>
-                  </label>
-                  <div className="radios">
-                    {COUNTRY_OPTIONS.map((opt) => (
-                      <label key={opt.code}>
-                        <input
-                          type="radio"
-                          name="countryCode"
-                          value={opt.code}
-                          checked={(currentItem.countryCode || "RUS") === opt.code}
-                          onChange={(e) =>
-                            updateItemField(currentItem.id, "countryCode", e.target.value)
-                          }
-                        />{" "}
-                        {opt.label}
-                      </label>
-                    ))}
-                  </div>
-                  {!currentItem.countryCode && (
-                    <div className="field-hint error">{tr("valCountry")}</div>
-                  )}
-                </div>
-              )}
 
               {lang === "ru" && (
                 <>
@@ -1395,6 +1407,7 @@ function App() {
                           />
                         </div>
                         <div className="card-fields">
+
                           <div className="mini">
                             <label>
                               {tr("labelDate")} {required && <span className="reqmark">*</span>}
