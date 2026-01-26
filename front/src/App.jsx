@@ -51,6 +51,7 @@ const i18n = {
     langRu: "Русский",
     naturalTranslationLabel: "자연스러운 한국어 번역",
     summaryTitle: "요약",
+    reportDateLabel: "보고서 월",
     summaryTotalItemsLabel: "총 항목 수",
     summaryGrandTotalLabel: "전체 합계",
     currencyWon: "원",
@@ -151,6 +152,7 @@ const i18n = {
     langKo: "Корейский",
     langRu: "Русский",
     summaryTitle: "Сводка",
+    reportDateLabel: "Месяц отчета",
     summaryTotalItemsLabel: "Всего пунктов",
     summaryGrandTotalLabel: "Итоговая сумма",
     currencyWon: "KRW",
@@ -266,6 +268,11 @@ function todayISO() {
   return `${d.getFullYear()}-${mm}-${dd}`;
 }
 
+function currentYearMonth() {
+  const d = new Date();
+  return { year: d.getFullYear(), month: d.getMonth() + 1 };
+}
+
 function formatNumber(num) {
   const n = Number(num) || 0;
   return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
@@ -323,6 +330,11 @@ function stripBlobPreview(receipt) {
   return receipt;
 }
 
+function uploadPreviewUrl(fileName) {
+  if (!fileName) return "";
+  return `${API_BASE || ""}/uploads/${fileName}`;
+}
+
 async function apiGetAccounts() {
   const res = await fetch(`${API_BASE}/api/accounts`);
   if (!res.ok) throw new Error(`accounts failed: ${res.status}`);
@@ -359,12 +371,24 @@ async function apiOcrFromUpload(fileName) {
   return res.json();
 }
 
-async function apiGenerateDocument(cleanItems, language, naturalTranslation) {
-  const res = await fetch(`${API_BASE}/api/generate-document`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ items: cleanItems, language, naturalTranslation })
-  });
+  async function apiGenerateDocument(
+    cleanItems,
+    language,
+    naturalTranslation,
+    reportYear,
+    reportMonth
+  ) {
+    const res = await fetch(`${API_BASE}/api/generate-document`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        items: cleanItems,
+        language,
+        naturalTranslation,
+        reportYear,
+        reportMonth
+      })
+    });
   if (!res.ok) {
     let msg = `generate failed: ${res.status}`;
     try {
@@ -411,6 +435,9 @@ function App() {
   const [isMobile, setIsMobile] = useState(false);
   const [viewMode, setViewMode] = useState("list");
   const [ruCountryCode, setRuCountryCode] = useState("");
+  const initialReportDate = currentYearMonth();
+  const [reportYear, setReportYear] = useState(initialReportDate.year);
+  const [reportMonth, setReportMonth] = useState(initialReportDate.month);
   const [serverInfo, setServerInfo] = useState({
     state: "checking",
     ready: false,
@@ -488,6 +515,8 @@ function App() {
           setRuCountryCode(savedCountry);
           setItemCounter(Number(parsed.itemCounter) || 0);
           setCurrentEditingItemId(parsed.currentEditingItemId ?? null);
+          if (parsed.reportYear) setReportYear(Number(parsed.reportYear) || initialReportDate.year);
+          if (parsed.reportMonth) setReportMonth(Number(parsed.reportMonth) || initialReportDate.month);
         }
       } catch (_) {
         // ignore parse errors
@@ -508,14 +537,16 @@ function App() {
         receipts: (it.receipts || []).map((r) => stripBlobPreview(r))
       })),
       itemCounter,
-      currentEditingItemId
+      currentEditingItemId,
+      reportYear,
+      reportMonth
     };
     try {
       localStorage.setItem(LS_KEY, JSON.stringify(payload));
     } catch (_) {
       // ignore storage errors
     }
-  }, [items, itemCounter, currentEditingItemId]);
+  }, [items, itemCounter, currentEditingItemId, reportYear, reportMonth]);
 
   useEffect(() => {
     if (currentEditingItemId && !items.some((i) => i.id === currentEditingItemId)) {
@@ -588,6 +619,10 @@ function App() {
   const currentItem = items.find((i) => i.id === currentEditingItemId) || null;
   const currencyLabel = currencyLabelForItem(currentItem || items[0], lang, ruCountryCode);
   const tr = (key) => t(lang, key);
+  const yearOptions = Array.from({ length: 6 }, (_, i) => initialReportDate.year - 2 + i);
+  const monthOptions = Array.from({ length: 12 }, (_, i) => i + 1);
+  const yearSuffix = lang === "ru" ? " г." : "년";
+  const monthSuffix = lang === "ru" ? " мес." : "월";
 
   function setSpinnerVisible(visible, text) {
     setSpinner({ visible, text: text || "" });
@@ -645,6 +680,8 @@ function App() {
     setCurrentEditingItemId(null);
     setEditorErrors([]);
     setRuCountryCode("");
+    setReportYear(initialReportDate.year);
+    setReportMonth(initialReportDate.month);
     localStorage.removeItem(LS_KEY);
   }
 
@@ -776,7 +813,19 @@ function App() {
           prev.map((it) => {
             if (it.id !== itemId) return it;
             const receipts = (it.receipts || []).map((r) =>
-              r.id === receiptId ? { ...r, fileName: up.fileName } : r
+              r.id === receiptId
+                ? (() => {
+                    if (r.preview && r.preview.startsWith("blob:")) {
+                      revokePreviewUrl(r.preview);
+                    }
+                    const previewUrl = uploadPreviewUrl(up.fileName);
+                    return {
+                      ...r,
+                      fileName: up.fileName,
+                      preview: previewUrl || r.preview
+                    };
+                  })()
+                : r
             );
             return { ...it, receipts };
           })
@@ -901,7 +950,9 @@ function App() {
       const result = await apiGenerateDocument(
         cleanItems,
         lang,
-        lang === "ru" ? naturalTranslation : false
+        lang === "ru" ? naturalTranslation : false,
+        reportYear,
+        reportMonth
       );
       setSpinnerVisible(false, "");
       if (result?.success && result?.downloadUrl) {
@@ -1016,7 +1067,35 @@ function App() {
       <main className="layout">
         {(!isMobile || viewMode === "list") && (
           <section className="panel left">
-            <div className="panel-title">{tr("summaryTitle")}</div>
+          <div className="panel-title">{tr("summaryTitle")}</div>
+
+            <div className="report-date">
+              <label className="report-label">{tr("reportDateLabel")}</label>
+              <div className="report-selects">
+                <select
+                  value={reportYear}
+                  onChange={(e) => setReportYear(parseInt(e.target.value, 10))}
+                >
+                  {yearOptions.map((y) => (
+                    <option key={y} value={y}>
+                      {y}
+                      {yearSuffix}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={reportMonth}
+                  onChange={(e) => setReportMonth(parseInt(e.target.value, 10))}
+                >
+                  {monthOptions.map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                      {monthSuffix}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
 
             <div className="summary">
               <div>

@@ -72,6 +72,31 @@ body{
   font-weight:800;
   margin-bottom:12px;
 }
+.report-date{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  margin-bottom:12px;
+  padding:10px 12px;
+  background:var(--gray-100);
+  border-radius:12px;
+}
+.report-label{
+  font-size:13px;
+  color:var(--gray-600);
+  font-weight:700;
+}
+.report-selects{
+  display:flex;
+  gap:8px;
+}
+.report-selects select{
+  border:1px solid var(--border);
+  border-radius:10px;
+  padding:6px 8px;
+  background:white;
+}
 .mobile-editor-header{
   display:flex;
   align-items:center;
@@ -347,6 +372,9 @@ body{
   .topbar{height:auto; gap:10px; padding:12px; flex-wrap:wrap}
   .layout{padding:12px}
   .summary{flex-direction:column; gap:6px}
+  .report-date{flex-direction:column; align-items:flex-start}
+  .report-selects{width:100%}
+  .report-selects select{width:100%}
   .items-table{display:block; overflow-x:auto}
   .items-table th,.items-table td{padding:8px; font-size:13px}
   .receipt-card .card-body{grid-template-columns: 1fr}

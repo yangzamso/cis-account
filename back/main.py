@@ -10,7 +10,7 @@ from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Request, Uplo
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, HTMLResponse
-from PIL import Image
+from PIL import Image, ImageOps
 
 import google.generativeai as genai
 
@@ -64,6 +64,8 @@ app.add_middleware(
 
 if os.path.isdir(FRONT_ASSETS_DIR):
     app.mount("/assets", StaticFiles(directory=FRONT_ASSETS_DIR), name="assets")
+if os.path.isdir(UPLOAD_DIR):
+    app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
 
 @app.middleware("http")
@@ -108,6 +110,7 @@ def safe_filename(original: str) -> str:
 def image_to_jpeg_bytes(file_bytes: bytes, max_side: int = 1800, quality: int = 85) -> bytes:
     """Gemini OCR 안정성을 위해 이미지를 RGB JPEG로 변환하고 리사이즈."""
     with Image.open(io.BytesIO(file_bytes)) as im:
+        im = ImageOps.exif_transpose(im)
         im = im.convert("RGB")
         w, h = im.size
         scale = min(1.0, max_side / float(max(w, h)))
@@ -116,6 +119,22 @@ def image_to_jpeg_bytes(file_bytes: bytes, max_side: int = 1800, quality: int = 
         out = io.BytesIO()
         im.save(out, format="JPEG", quality=quality, optimize=True)
         return out.getvalue()
+
+
+def normalize_image_bytes(file_bytes: bytes) -> bytes:
+    try:
+        with Image.open(io.BytesIO(file_bytes)) as im:
+            im = ImageOps.exif_transpose(im)
+            fmt = (im.format or "JPEG").upper()
+            out = io.BytesIO()
+            save_kwargs = {}
+            if fmt == "JPEG":
+                im = im.convert("RGB")
+                save_kwargs = {"quality": 92, "optimize": True}
+            im.save(out, format=fmt, **save_kwargs)
+            return out.getvalue()
+    except Exception:
+        return file_bytes
 
 
 def parse_json_strict(text: str) -> Dict[str, Any]:
@@ -447,14 +466,23 @@ def set_row_height(row, cm_value: float = 0.65):
     row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
 
 
-def add_summary_table(doc: Document, items: List[Dict[str, Any]], language: str):
+def add_summary_table(
+    doc: Document,
+    items: List[Dict[str, Any]],
+    language: str,
+    report_year: Optional[int] = None,
+    report_month: Optional[int] = None,
+):
     title_p = doc.add_paragraph()
     title_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    report_suffix = ""
+    if report_year and report_month:
+        report_suffix = f" - {report_year % 100}년 {int(report_month)}월"
     if language == "ru":
         country = country_name_ko(doc_country_code(items))
-        title = f"CIS 지역 - 지출내역서 - {country}".strip()
+        title = f"CIS 지역 - 지출내역서 - {country}{report_suffix}".strip()
     else:
-        title = "CIS 청구 문서"
+        title = f"CIS 청구 문서{report_suffix}"
     add_run_k(title_p, title, bold=True, size_pt=18)
     title_p.paragraph_format.space_after = Pt(12)
 
@@ -736,11 +764,12 @@ async def upload_receipt(file: UploadFile = File(...)):
     if len(content) > 10 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="File too large (max 10MB)")
 
+    normalized_content = normalize_image_bytes(content)
     fname = f"{now_ts()}_{safe_filename(file.filename or 'receipt')}"
     save_path = os.path.join(UPLOAD_DIR, fname)
 
     with open(save_path, "wb") as f:
-        f.write(content)
+        f.write(normalized_content)
 
     ocr_payload: Dict[str, Any] = {
         "date": None,
@@ -753,7 +782,7 @@ async def upload_receipt(file: UploadFile = File(...)):
     ocr_error = ""
     if ensure_gemini_ready():
         try:
-            ocr_payload = gemini_ocr(content)
+            ocr_payload = gemini_ocr(normalized_content)
             ocr_success = True
             print(
                 "[OCR][upload]",
@@ -797,7 +826,8 @@ async def ocr(file: UploadFile = File(...)):
     print("=" * 60)
 
     try:
-        result = gemini_ocr(content)
+        normalized_content = normalize_image_bytes(content)
+        result = gemini_ocr(normalized_content)
         print("OCR 성공", result)
         print("=" * 60)
         return {"success": True, **result}
@@ -852,6 +882,16 @@ async def generate_document(payload: Dict[str, Any]):
 
     language = str(payload.get("language") or "ko").lower()
     natural_translation = bool(payload.get("naturalTranslation"))
+    report_year = payload.get("reportYear")
+    report_month = payload.get("reportMonth")
+    try:
+        report_year = int(report_year) if report_year is not None else None
+    except (TypeError, ValueError):
+        report_year = None
+    try:
+        report_month = int(report_month) if report_month is not None else None
+    except (TypeError, ValueError):
+        report_month = None
     if language == "ru":
         try:
             items = translate_items_to_korean(items, natural=natural_translation)
@@ -872,7 +912,7 @@ async def generate_document(payload: Dict[str, Any]):
     section.left_margin = Inches(0.5)
     section.right_margin = Inches(0.5)
 
-    add_summary_table(doc, items, language)
+    add_summary_table(doc, items, language, report_year, report_month)
 
     for i, it in enumerate(items, start=1):
         add_item_detail(doc, it, i, language)
