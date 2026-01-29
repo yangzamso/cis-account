@@ -1,7 +1,10 @@
+import asyncio
 import io
 import json
+import logging
 import os
 import re
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -24,6 +27,17 @@ from docx.shared import Cm, Inches, Pt
 
 
 # ----------------------------
+# Logging Setup
+# ----------------------------
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S"
+)
+logger = logging.getLogger(__name__)
+
+
+# ----------------------------
 # Env & Paths
 # ----------------------------
 load_dotenv()
@@ -43,20 +57,105 @@ RECEIPT_RETENTION_HOURS = int(os.getenv("RECEIPT_RETENTION_HOURS", "3"))
 
 MODEL_NAME = "gemini-2.0-flash-exp"
 
-ACCOUNTS = {
-    "이진모": {"bank": "우리", "account": "928-017364-02-101"},
-    "박지민": {"bank": "기업", "account": "183-104009-01-018"},
-}
+
+# ----------------------------
+# Constants
+# ----------------------------
+MAX_FILE_SIZE_MB = 10
+MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
+IMAGE_MAX_SIDE = 1800
+JPEG_QUALITY = 85
+FONT_SIZE_NORMAL = 11
+FONT_SIZE_TITLE = 18
+FONT_SIZE_ITEM_TITLE = 14
+CLEANUP_INTERVAL_SECONDS = 600  # 10분
+
+
+# ----------------------------
+# Pre-compiled Regex Patterns
+# ----------------------------
+JSON_PATTERN = re.compile(r"\{.*\}", re.DOTALL)
+DATE_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}")
+SAFE_FILENAME_PATTERN = re.compile(r"[^a-zA-Z0-9가-힣_-]")
+CODE_BLOCK_START_PATTERN = re.compile(r"^```(?:json)?\s*", re.IGNORECASE)
+CODE_BLOCK_END_PATTERN = re.compile(r"\s*```$")
+DIGIT_ONLY_PATTERN = re.compile(r"[^\d]")
+
+
+# ----------------------------
+# Account Info (from env)
+# ----------------------------
+def load_accounts_from_env() -> Dict[str, Dict[str, str]]:
+    """Load account info from environment variable."""
+    accounts_json = os.getenv("ACCOUNTS_JSON", "")
+    if accounts_json:
+        try:
+            return json.loads(accounts_json)
+        except json.JSONDecodeError:
+            logger.warning("Failed to parse ACCOUNTS_JSON, using defaults")
+    # Fallback to individual env vars
+    return {
+        "이진모": {
+            "bank": os.getenv("ACCOUNT_JINMO_BANK", ""),
+            "account": os.getenv("ACCOUNT_JINMO_NUMBER", "")
+        },
+        "박지민": {
+            "bank": os.getenv("ACCOUNT_JIMIN_BANK", ""),
+            "account": os.getenv("ACCOUNT_JIMIN_NUMBER", "")
+        },
+    }
+
+ACCOUNTS = load_accounts_from_env()
+
+
+# ----------------------------
+# CORS Configuration
+# ----------------------------
+ALLOWED_ORIGINS = os.getenv(
+    "ALLOWED_ORIGINS",
+    "http://localhost:8000,http://localhost:5173,http://127.0.0.1:8000,http://127.0.0.1:5173"
+).split(",")
+
+
+# ----------------------------
+# Background Cleanup Task
+# ----------------------------
+async def periodic_cleanup():
+    """Background task to periodically clean up expired files."""
+    while True:
+        try:
+            removed = cleanup_expired_files()
+            if removed > 0:
+                logger.info(f"Cleanup: removed {removed} expired files")
+        except Exception as e:
+            logger.error(f"Cleanup error: {e}")
+        await asyncio.sleep(CLEANUP_INTERVAL_SECONDS)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan context manager for startup/shutdown events."""
+    # Startup: start background cleanup task
+    cleanup_task = asyncio.create_task(periodic_cleanup())
+    logger.info("Started periodic cleanup task")
+    yield
+    # Shutdown: cancel cleanup task
+    cleanup_task.cancel()
+    try:
+        await cleanup_task
+    except asyncio.CancelledError:
+        pass
+    logger.info("Stopped periodic cleanup task")
 
 
 # ----------------------------
 # App
 # ----------------------------
-app = FastAPI(title="CIS Billing Doc Automation")
+app = FastAPI(title="CIS Billing Doc Automation", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -66,12 +165,6 @@ if os.path.isdir(FRONT_ASSETS_DIR):
     app.mount("/assets", StaticFiles(directory=FRONT_ASSETS_DIR), name="assets")
 if os.path.isdir(UPLOAD_DIR):
     app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
-
-
-@app.middleware("http")
-async def cleanup_middleware(request: Request, call_next):
-    cleanup_expired_files()
-    return await call_next(request)
 
 
 # ----------------------------
@@ -103,11 +196,11 @@ def cleanup_expired_files() -> int:
 
 def safe_filename(original: str) -> str:
     original = os.path.basename(original)
-    original = re.sub(r"[^a-zA-Z0-9가-힣_-]", "_", original)
+    original = SAFE_FILENAME_PATTERN.sub("_", original)
     return original[:120]
 
 
-def image_to_jpeg_bytes(file_bytes: bytes, max_side: int = 1800, quality: int = 85) -> bytes:
+def image_to_jpeg_bytes(file_bytes: bytes, max_side: int = IMAGE_MAX_SIDE, quality: int = JPEG_QUALITY) -> bytes:
     """Gemini OCR 안정성을 위해 이미지를 RGB JPEG로 변환하고 리사이즈."""
     with Image.open(io.BytesIO(file_bytes)) as im:
         im = ImageOps.exif_transpose(im)
@@ -145,10 +238,10 @@ def parse_json_strict(text: str) -> Dict[str, Any]:
         raise ValueError("Empty response")
 
     text = text.strip()
-    text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
-    text = re.sub(r"\s*```$", "", text)
+    text = CODE_BLOCK_START_PATTERN.sub("", text)
+    text = CODE_BLOCK_END_PATTERN.sub("", text)
 
-    m = re.search(r"\{.*\}", text, flags=re.DOTALL)
+    m = JSON_PATTERN.search(text)
     if not m:
         raise ValueError("No JSON object found")
     json_str = m.group(0)
@@ -160,7 +253,7 @@ def normalize_date(date_str: Optional[str]) -> Optional[str]:
     if not date_str:
         return None
     date_str = date_str.strip()
-    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", date_str):
+    if DATE_PATTERN.fullmatch(date_str):
         return date_str
     return None
 
@@ -173,7 +266,7 @@ def normalize_amount(amount: Any) -> Optional[int]:
     if isinstance(amount, float):
         return int(amount)
     if isinstance(amount, str):
-        s = re.sub(r"[^\d]", "", amount)
+        s = DIGIT_ONLY_PATTERN.sub("", amount)
         if s:
             return int(s)
     return None
@@ -453,7 +546,7 @@ def docx_set_default_style(doc: Document):
     style = doc.styles["Normal"]
     font = style.font
     font.name = "맑은 고딕"
-    font.size = Pt(11)
+    font.size = Pt(FONT_SIZE_NORMAL)
     style._element.rPr.rFonts.set(qn("w:eastAsia"), "맑은 고딕")
     para = style.paragraph_format
     para.space_before = Pt(0)
@@ -483,7 +576,7 @@ def add_summary_table(
         title = f"CIS 지역 - 지출내역서 - {country}{report_suffix}".strip()
     else:
         title = f"CIS 청구 문서{report_suffix}"
-    add_run_k(title_p, title, bold=True, size_pt=18)
+    add_run_k(title_p, title, bold=True, size_pt=FONT_SIZE_TITLE)
     title_p.paragraph_format.space_after = Pt(12)
 
     table = doc.add_table(rows=1, cols=5)
@@ -583,7 +676,7 @@ def add_item_detail(doc: Document, item: Dict[str, Any], item_index: int, langua
     doc.add_page_break()
     title_p = doc.add_paragraph()
     title_text = str(item.get("description") or "").strip() or "상세내용"
-    add_run_k(title_p, f"{item_index}. {title_text}", bold=True, size_pt=14)
+    add_run_k(title_p, f"{item_index}. {title_text}", bold=True, size_pt=FONT_SIZE_ITEM_TITLE)
 
     info = doc.add_paragraph()
     add_run_k(info, "영수증 일자: ", bold=True)
@@ -761,8 +854,8 @@ async def upload_receipt(file: UploadFile = File(...)):
     cleanup_expired_files()
 
     content = await file.read()
-    if len(content) > 10 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="File too large (max 10MB)")
+    if len(content) > MAX_FILE_SIZE_BYTES:
+        raise HTTPException(status_code=400, detail=f"File too large (max {MAX_FILE_SIZE_MB}MB)")
 
     normalized_content = normalize_image_bytes(content)
     fname = f"{now_ts()}_{safe_filename(file.filename or 'receipt')}"
@@ -784,19 +877,15 @@ async def upload_receipt(file: UploadFile = File(...)):
         try:
             ocr_payload = gemini_ocr(normalized_content)
             ocr_success = True
-            print(
-                "[OCR][upload]",
-                {
-                    "date": ocr_payload.get("date"),
-                    "amount": ocr_payload.get("amount"),
-                    "merchant": ocr_payload.get("merchant"),
-                    "hasMultipleCurrency": ocr_payload.get("hasMultipleCurrency"),
-                    "rawText": ocr_payload.get("rawText"),
-                },
+            logger.info(
+                "[OCR][upload] date=%s amount=%s merchant=%s",
+                ocr_payload.get("date"),
+                ocr_payload.get("amount"),
+                ocr_payload.get("merchant"),
             )
         except Exception as e:
             ocr_error = str(e)
-            print("[OCR][upload] failed:", ocr_error)
+            logger.error("[OCR][upload] failed: %s", ocr_error)
 
     return {
         "success": True,
@@ -817,23 +906,18 @@ async def ocr(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="No file")
 
     content = await file.read()
-    if len(content) > 10 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="File too large (max 10MB)")
+    if len(content) > MAX_FILE_SIZE_BYTES:
+        raise HTTPException(status_code=400, detail=f"File too large (max {MAX_FILE_SIZE_MB}MB)")
 
-    print("=" * 60)
-    print("OCR 요청 시작")
-    print(f"파일명 {file.filename}")
-    print("=" * 60)
+    logger.info("[OCR] request started: %s", file.filename)
 
     try:
         normalized_content = normalize_image_bytes(content)
         result = gemini_ocr(normalized_content)
-        print("OCR 성공", result)
-        print("=" * 60)
+        logger.info("[OCR] success: date=%s amount=%s", result.get("date"), result.get("amount"))
         return {"success": True, **result}
     except Exception as e:
-        print("OCR 실패:", repr(e))
-        print("=" * 60)
+        logger.error("[OCR] failed: %s", repr(e))
         return {
             "success": False,
             "error": str(e),
@@ -859,10 +943,10 @@ async def ocr_from_upload(payload: Dict[str, Any]):
         with open(img_path, "rb") as f:
             content = f.read()
         result = gemini_ocr(content)
-        print("[OCR][from-upload]", result)
+        logger.info("[OCR][from-upload] date=%s amount=%s", result.get("date"), result.get("amount"))
         return {"success": True, **result}
     except Exception as e:
-        print("[OCR][from-upload] failed:", str(e))
+        logger.error("[OCR][from-upload] failed: %s", str(e))
         return {
             "success": False,
             "error": str(e),
@@ -892,58 +976,70 @@ async def generate_document(payload: Dict[str, Any]):
         report_month = int(report_month) if report_month is not None else None
     except (TypeError, ValueError):
         report_month = None
+
+    logger.info("[Document] generating: language=%s, items=%d", language, len(items))
+
     if language == "ru":
         try:
             items = translate_items_to_korean(items, natural=natural_translation)
         except Exception as e:
+            logger.error("[Document] translation failed: %s", e)
             raise HTTPException(status_code=400, detail=f"Translation failed: {e}")
 
     errors = validate_items(items, language)
     if errors:
+        logger.warning("[Document] validation failed: %s", errors)
         raise HTTPException(status_code=400, detail={"message": "Validation failed", "errors": errors})
 
-    doc = Document()
-    docx_set_default_style(doc)
+    try:
+        doc = Document()
+        docx_set_default_style(doc)
 
-    section = doc.sections[0]
-    section.orientation = WD_ORIENTATION.PORTRAIT
-    section.top_margin = Inches(0.5)
-    section.bottom_margin = Inches(0.5)
-    section.left_margin = Inches(0.5)
-    section.right_margin = Inches(0.5)
+        section = doc.sections[0]
+        section.orientation = WD_ORIENTATION.PORTRAIT
+        section.top_margin = Inches(0.5)
+        section.bottom_margin = Inches(0.5)
+        section.left_margin = Inches(0.5)
+        section.right_margin = Inches(0.5)
 
-    add_summary_table(doc, items, language, report_year, report_month)
+        add_summary_table(doc, items, language, report_year, report_month)
 
-    for i, it in enumerate(items, start=1):
-        add_item_detail(doc, it, i, language)
+        for i, it in enumerate(items, start=1):
+            add_item_detail(doc, it, i, language)
 
-    if language == "ru":
-        country_code = doc_country_code(items)
-        code_map = {
-            "RUS": "RUS",
-            "CRM": "CRM",
-            "KAZ": "KAZ",
-            "UZB": "UZB",
-            "UKR": "UKR",
-        }
-        code = code_map.get(country_code, "RUS")
-        base_name = f"CIS-Recipe-{code}-{datetime.now().strftime('%Y%m%d')}"
-        out_name = f"{base_name}.docx"
-        if os.path.exists(os.path.join(OUTPUT_DIR, out_name)):
-            idx = 1
-            while True:
-                candidate = f"{base_name}_{idx}.docx"
-                if not os.path.exists(os.path.join(OUTPUT_DIR, candidate)):
-                    out_name = candidate
-                    break
-                idx += 1
-    else:
-        out_name = f"CIS-recipe_{datetime.now().strftime('%Y%m%d_%H%M%S')}.docx"
-    out_path = os.path.join(OUTPUT_DIR, out_name)
-    doc.save(out_path)
-    record_output_manifest(out_name, items)
+        if language == "ru":
+            country_code = doc_country_code(items)
+            code_map = {
+                "RUS": "RUS",
+                "CRM": "CRM",
+                "KAZ": "KAZ",
+                "UZB": "UZB",
+                "UKR": "UKR",
+            }
+            code = code_map.get(country_code, "RUS")
+            base_name = f"CIS-Recipe-{code}-{datetime.now().strftime('%Y%m%d')}"
+            out_name = f"{base_name}.docx"
+            if os.path.exists(os.path.join(OUTPUT_DIR, out_name)):
+                idx = 1
+                while True:
+                    candidate = f"{base_name}_{idx}.docx"
+                    if not os.path.exists(os.path.join(OUTPUT_DIR, candidate)):
+                        out_name = candidate
+                        break
+                    idx += 1
+        else:
+            out_name = f"CIS-recipe_{datetime.now().strftime('%Y%m%d_%H%M%S')}.docx"
 
-    return {"success": True, "downloadUrl": f"/downloads/{out_name}"}
+        out_path = os.path.join(OUTPUT_DIR, out_name)
+        doc.save(out_path)
+        record_output_manifest(out_name, items)
+
+        logger.info("[Document] generated successfully: %s", out_name)
+        return {"success": True, "downloadUrl": f"/downloads/{out_name}"}
+
+    except Exception as e:
+        logger.error("[Document] generation failed: %s", repr(e))
+        raise HTTPException(status_code=500, detail=f"Document generation failed: {str(e)}")
 
 
 if __name__ == "__main__":

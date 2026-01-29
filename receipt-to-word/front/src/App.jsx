@@ -1,264 +1,36 @@
-﻿
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 
-const API_BASE =
-  import.meta.env.VITE_API_BASE ||
-  (import.meta.env.DEV ? "http://localhost:8000" : "");
-const LS_KEY = "cis_expense_data_v2";
-const LS_LANG = "cis_ui_lang";
-const MOBILE_BREAKPOINT = 640;
+// Import constants
+import {
+  API_BASE,
+  LS_KEY,
+  LS_LANG,
+  MOBILE_BREAKPOINT,
+  RECIPIENT_JINMO,
+  RECIPIENT_JIMIN,
+  RECIPIENT_OTHER,
+  COUNTRY_OPTIONS,
+  COUNTRY_CURRENCY,
+  DESCRIPTION_PRESETS_KO
+} from "./constants/config";
 
-const RECIPIENT_JINMO = "이진모";
-const RECIPIENT_JIMIN = "박지민";
-const RECIPIENT_OTHER = "기타";
+// Import i18n
+import { t, fmt } from "./constants/i18n";
 
-const accountDatabase = {
-  [RECIPIENT_JINMO]: { bank: "우리", account: "928-017364-02-101" },
-  [RECIPIENT_JIMIN]: { bank: "기업", account: "183-104009-01-018" }
-};
+// Import hooks
+import { safeSetLocalStorage, safeGetLocalStorage, stripBlobPreview, revokePreviewUrl } from "./hooks/useLocalStorage";
+import { apiGetAccounts, apiUploadReceipt, apiOcrFromUpload, apiGenerateDocument, uploadPreviewUrl } from "./hooks/useApi";
 
-const COUNTRY_OPTIONS = [
-  { code: "RUS", label: "Россия" },
-  { code: "CRM", label: "Крым" },
-  { code: "KAZ", label: "Казахстан" },
-  { code: "UZB", label: "Узбекистан" },
-  { code: "UKR", label: "Украина" }
-];
+// Import components
+import ReceiptCard from "./components/ReceiptCard";
 
-const COUNTRY_CURRENCY = {
-  RUS: "рубль",
-  CRM: "рубль",
-  KAZ: "тенге",
-  UZB: "сум",
-  UKR: "гривна"
-};
-
-const DESCRIPTION_PRESETS_KO = [
-  "기타",
-  "CIS지역 - 버니 서버이용료 - 월",
-  "영어지역 - 버니 서버이용료- 월",
-  "스페인지역 - 버니 서버이용료- 월",
-  "카마테라 - 전도사이트 호스팅료- 월",
-  "배알리나 숙소비 - 월"
-];
-
-const i18n = {
-  ko: {
-    brandTitle: "증빙철 자동화",
-    documentTitle: "증빙철 자동화",
-    langLabel: "언어",
-    langKo: "한국어",
-    langRu: "Русский",
-    naturalTranslationLabel: "자연스러운 한국어 번역",
-    summaryTitle: "요약",
-    reportDateLabel: "보고서 월",
-    summaryTotalItemsLabel: "총 항목 수",
-    summaryGrandTotalLabel: "전체 합계",
-    currencyWon: "원",
-    tableHeaderIndex: "번호",
-    tableHeaderContent: "내용",
-    tableHeaderAmount: "금액",
-    tableHeaderActions: "액션",
-    btnAddItem: "항목 추가",
-    btnGenerate: "문서 생성",
-    btnReset: "초기화",
-    hintLine1: "좌측 리스트: 항목 선택",
-    hintLine2: "OCR 실패 시 날짜/금액 직접 입력 가능",
-    hintLine3: "자동 저장 간격 30초",
-    guideTitle: "사용법 안내",
-    guideLine1: "1) [항목 추가]를 눌러 새 항목을 만들어요.",
-    guideLine2: "2) 오른쪽에서 날짜, 상세내용을 입력해요.",
-    guideLine3: "3) [영수증 추가]를 눌러 사진을 넣어요.",
-    guideLine4: "4) 금액/날짜가 틀리면 직접 고쳐요.",
-    guideLine5: "5) 모두 끝나면 [문서 생성]을 눌러요.",
-    detailTitle: "상세 편집",
-    descriptionPresetLabel: "상세 내용 선택",
-    emptyStateNoSelection: "좌측에서 항목을 선택하거나 새 항목을 추가해주세요.",
-    fieldDescription: "상세 내용 *",
-    phDescription: "예: 서버 사용료",
-    fieldDate: "영수증 일자 *",
-    fieldManagerName: "담당자 이름",
-    fieldTelegramId: "텔레그램 ID",
-    fieldRecipientType: "수령인 *",
-    recipientJinmo: "이진모",
-    recipientJimin: "박지민",
-    recipientOther: "기타",
-    fieldRecipientName: "예금자명 *",
-    fieldRecipientNameHelp: "실제 통장 계좌의 예금자명을 정확히 기록해야 합니다.",
-    phRecipientName: "예: 홍길동",
-    fieldBank: "은행 *",
-    phBank: "예: 국민",
-    fieldAccount: "계좌번호 *",
-    phAccount: "예: 000-0000-0000",
-    receiptTitle: "영수증",
-    btnAddReceipt: "영수증 추가",
-    dropzoneText: "여기에 드래그앤드롭 / 또는 Ctrl+V로 이미지 붙여넣기",
-    btnSaveItem: "저장",
-    btnBackList: "목록으로",
-    spinnerOcr: "OCR 처리 중...",
-    noItemsInTable: "등록된 항목이 없습니다. 새 항목을 추가해주세요.",
-    badgeIncomplete: "미완료",
-    badgeComplete: "완료",
-    badgeRequired: "필수",
-    badgeOptional: "선택",
-    badgeMultiCurrency: "다중 통화",
-    descDraft: "작성 중",
-    noReceiptsYet: "아직 영수증이 없습니다.",
-    phReceiptDesc: "예: 택시비",
-    actionEdit: "편집",
-    actionDelete: "삭제",
-    itemLabel: "항목",
-    receiptCardTitle: "영수증",
-    labelDate: "날짜",
-    labelAmount: "금액 (원)",
-    labelDescription: "설명 (선택)",
-    ocrToggleShow: "OCR 원문 보기",
-    ocrToggleHide: "OCR 원문 숨기기",
-    ocrNone: "(OCR 원문 없음)",
-    msgInvalidImage: "이미지 파일만 업로드 가능합니다 (JPG/PNG/WebP).",
-    msgOcrFailed: "OCR 처리에 실패했습니다. 날짜/금액을 직접 입력하세요.",
-    msgFileProcessFailed: "파일 처리에 실패했습니다.",
-    msgUploadFailed: "업로드에 실패했습니다.",
-    msgUploadCanceled: "업로드가 취소되었습니다.",
-    msgNoItemsGenerate: "최소 1개 이상의 항목이 필요합니다.",
-    msgGenerateFailed: "문서 생성에 실패했습니다.",
-    confirmDeleteItem: "{name} 항목을 삭제할까요?",
-    confirmReset: "모든 데이터를 초기화할까요?",
-    confirmGeneratedReset: "문서 생성 후 초기화할까요?",
-    msgItemIncomplete: "항목이 미완료 상태입니다. 필수 정보를 입력하세요.",
-    valDescription: "상세 내용이 필요합니다.",
-    valDate: "결제일자가 필요합니다.",
-    valRecipientType: "수령인 구분이 필요합니다.",
-    valReceiptRequired: "최소 1개의 영수증이 필요합니다.",
-    valRecipientName: "수령인명이 필요합니다.",
-    valBank: "은행명이 필요합니다.",
-    valAccount: "계좌번호가 필요합니다.",
-    valFirstReceiptDate: "첫 번째 영수증 날짜가 필요합니다.",
-    valFirstReceiptAmount: "첫 번째 영수증 금액이 필요합니다.",
-    valCountry: "국가를 선택해주세요.",
-    valManagerName: "담당자 이름을 입력해주세요.",
-    msgSelectItemBeforeDrop: "먼저 항목을 선택해주세요.",
-    serverChecking: "서버 상태 확인 중...",
-    serverConnected: "서버 연결됨 - {model}",
-    serverStatus: "서버: {status} - {model}",
-    serverFailed: "서버 연결 실패 (백엔드 실행/주소 확인)",
-    spinnerGenerating: "문서 생성 중...",
-    spinnerUploading: "영수증 업로드 중..."
-  },
-  ru: {
-    brandTitle: "Автоматизация документов по расходам CIS",
-    documentTitle: "Автоматизация документов по расходам CIS",
-    langLabel: "Язык",
-    langKo: "Корейский",
-    langRu: "Русский",
-    summaryTitle: "Сводка",
-    reportDateLabel: "Месяц отчета",
-    summaryTotalItemsLabel: "Всего пунктов",
-    summaryGrandTotalLabel: "Итоговая сумма",
-    currencyWon: "KRW",
-    tableHeaderIndex: "№",
-    tableHeaderContent: "Содержание",
-    tableHeaderAmount: "Сумма",
-    tableHeaderActions: "Действия",
-    btnAddItem: "Добавить пункт",
-    btnGenerate: "Скачать корейский документ",
-    btnReset: "Сброс",
-    hintLine1: "Подсказка: пункт выбирается слева, редактируется справа.",
-    hintLine2: "Фотографии чеков можно перетаскивать мышкой.",
-    hintLine3: "Документ скачивается кнопкой «Скачать корейский документ».",
-    guideTitle: "Инструкция",
-    guideLine1: "1) Нажмите «Добавить пункт».",
-    guideLine2: "2) Выберите страну и заполните дату и описание.",
-    guideLine3: "3) Добавьте фото чека кнопкой «Добавить квитанцию» или перетаскиванием.",
-    guideLine4: "4) Проверьте дату и сумму, при ошибке исправьте вручную.",
-    guideLine5: "5) Нажмите «Скачать корейский документ».",
-    detailTitle: "Детали",
-    emptyStateNoSelection: "Выберите пункт слева или добавьте новый.",
-    fieldDescription: "Описание *",
-    phDescription: "например: плата за сервер",
-    fieldDate: "Дата чека *",
-    fieldManagerName: "Имя ответственного *",
-    fieldTelegramId: "Telegram ID",
-    fieldRecipientType: "Тип получателя *",
-    recipientJinmo: "Ли Джинмо",
-    recipientJimin: "Пак Чимин",
-    recipientOther: "Другое",
-    fieldRecipientName: "Имя получателя *",
-    phRecipientName: "например: Иван Иванов",
-    fieldBank: "Банк *",
-    phBank: "например: KB",
-    fieldAccount: "Номер счёта *",
-    phAccount: "например: 000-0000-0000",
-    receiptTitle: "Квитанция",
-    btnAddReceipt: "Добавить квитанцию",
-    dropzoneText: "Перетащите сюда / или вставьте Ctrl+V",
-    btnSaveItem: "Сохранить",
-    btnBackList: "К списку",
-    spinnerOcr: "OCR в процессе...",
-    noItemsInTable: "Пока нет пунктов. Добавьте новый.",
-    badgeIncomplete: "Не заполнено",
-    badgeComplete: "Заполнено",
-    badgeRequired: "Обязательно",
-    badgeOptional: "Необязательно",
-    badgeMultiCurrency: "Несколько валют",
-    descDraft: "Черновик",
-    noReceiptsYet: "Квитанций пока нет.",
-    phReceiptDesc: "например: такси",
-    actionEdit: "Редактировать",
-    actionDelete: "Удалить",
-    itemLabel: "Пункт",
-    receiptCardTitle: "Квитанция",
-    labelDate: "Дата",
-    labelAmount: "Сумма",
-    labelDescription: "Описание (необязательно)",
-    ocrToggleShow: "Показать OCR",
-    ocrToggleHide: "Скрыть OCR",
-    ocrNone: "(OCR отсутствует)",
-    msgInvalidImage: "Поддерживаются только изображения (JPG/PNG/WebP).",
-    msgOcrFailed: "OCR не удалось. Введите дату/сумму вручную.",
-    msgFileProcessFailed: "Не удалось обработать файл.",
-    msgUploadFailed: "Не удалось загрузить.",
-    msgUploadCanceled: "Загрузка отменена.",
-    msgNoItemsGenerate: "Нужен хотя бы один пункт.",
-    msgGenerateFailed: "Не удалось создать документ.",
-    confirmDeleteItem: "Удалить {name}?",
-    confirmReset: "Сбросить все данные?",
-    confirmGeneratedReset: "Сбросить после создания?",
-    msgItemIncomplete: "Пункт заполнен не полностью. Заполните обязательные поля.",
-    valDescription: "Нужно описание.",
-    valDate: "Нужна дата оплаты.",
-    valRecipientType: "Нужно указать тип получателя.",
-    valReceiptRequired: "Нужна минимум одна квитанция.",
-    valRecipientName: "Нужно имя получателя.",
-    valBank: "Нужен банк.",
-    valAccount: "Нужен номер счёта.",
-    valFirstReceiptDate: "Нужна дата первой квитанции.",
-    valFirstReceiptAmount: "Нужна сумма первой квитанции.",
-    valCountry: "Выберите страну.",
-    valManagerName: "Введите имя ответственного.",
-    msgSelectItemBeforeDrop: "Сначала выберите пункт.",
-    serverChecking: "Проверка сервера...",
-    serverConnected: "Сервер подключён - {model}",
-    serverStatus: "Сервер: {status} - {model}",
-    serverFailed: "Сервер недоступен (проверьте бэкенд)",
-    spinnerGenerating: "Создание документа...",
-    spinnerUploading: "Загрузка квитанции...",
-    countryLabel: "Страна"
-  }
-};
-
-function t(lang, key) {
-  return i18n[lang]?.[key] ?? i18n.ko[key] ?? key;
-}
+// Account database - loaded from server
+let accountDatabase = {};
 
 function currencyLabelForItem(item, lang, ruCountryCode) {
   if (lang !== "ru") return t("ko", "currencyWon");
   const code = String(ruCountryCode || item?.countryCode || "").toUpperCase();
   return COUNTRY_CURRENCY[code] || "";
-}
-
-function fmt(template, vars) {
-  return template.replace(/\{(\w+)\}/g, (_, k) => String(vars?.[k] ?? ""));
 }
 
 function todayISO() {
@@ -314,95 +86,6 @@ function extractOcrField(ocr, key) {
 
 function sumReceipts(receipts) {
   return (receipts || []).reduce((acc, r) => acc + (Number(r.amount) || 0), 0);
-}
-
-function revokePreviewUrl(url) {
-  if (url && typeof url === "string" && url.startsWith("blob:")) {
-    URL.revokeObjectURL(url);
-  }
-}
-
-function stripBlobPreview(receipt) {
-  if (!receipt) return receipt;
-  if (receipt.preview && receipt.preview.startsWith("blob:")) {
-    return { ...receipt, preview: "" };
-  }
-  return receipt;
-}
-
-function uploadPreviewUrl(fileName) {
-  if (!fileName) return "";
-  return `${API_BASE || ""}/uploads/${fileName}`;
-}
-
-async function apiGetAccounts() {
-  const res = await fetch(`${API_BASE}/api/accounts`);
-  if (!res.ok) throw new Error(`accounts failed: ${res.status}`);
-  return res.json();
-}
-
-async function apiUploadReceipt(file) {
-  console.warn("[upload] start", { name: file?.name, size: file?.size, type: file?.type });
-  const fd = new FormData();
-  fd.append("file", file);
-  const res = await fetch(`${API_BASE}/api/upload-receipt`, {
-    method: "POST",
-    body: fd
-  });
-  if (!res.ok) {
-    const t = await res.text().catch(() => "");
-    throw new Error(`upload failed: ${res.status} ${t}`);
-  }
-  const json = await res.json();
-  console.warn("[upload] ok", json);
-  return json;
-}
-
-async function apiOcrFromUpload(fileName) {
-  const res = await fetch(`${API_BASE}/api/ocr-from-upload`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ fileName })
-  });
-  if (!res.ok) {
-    const t = await res.text().catch(() => "");
-    throw new Error(`ocr-from-upload failed: ${res.status} ${t}`);
-  }
-  return res.json();
-}
-
-  async function apiGenerateDocument(
-    cleanItems,
-    language,
-    naturalTranslation,
-    reportYear,
-    reportMonth
-  ) {
-    const res = await fetch(`${API_BASE}/api/generate-document`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        items: cleanItems,
-        language,
-        naturalTranslation,
-        reportYear,
-        reportMonth
-      })
-    });
-  if (!res.ok) {
-    let msg = `generate failed: ${res.status}`;
-    try {
-      const j = await res.json();
-      if (j?.detail?.errors) msg = j.detail.errors.join("\n");
-      else if (j?.detail?.message && j?.detail?.errors) msg = j.detail.errors.join("\n");
-      else if (j?.detail) msg = JSON.stringify(j.detail);
-    } catch (_) {
-      const t = await res.text().catch(() => "");
-      if (t) msg = t;
-    }
-    throw new Error(msg);
-  }
-  return res.json();
 }
 
 function isItemComplete(item, lang, ruCountryCode) {
@@ -541,11 +224,7 @@ function App() {
       reportYear,
       reportMonth
     };
-    try {
-      localStorage.setItem(LS_KEY, JSON.stringify(payload));
-    } catch (_) {
-      // ignore storage errors
-    }
+    safeSetLocalStorage(LS_KEY, payload);
   }, [items, itemCounter, currentEditingItemId, reportYear, reportMonth]);
 
   useEffect(() => {
@@ -567,6 +246,10 @@ function App() {
         const model = data?.server_info?.model || "Unknown";
         const ready = !!data?.server_info?.api_ready;
         const status = data?.server_info?.status || (ready ? "OK" : "API Key missing");
+        // Update account database from server
+        if (data?.accounts) {
+          accountDatabase = data.accounts;
+        }
         if (!mounted) return;
         setServerInfo({ state: "ready", ready, status, model });
       } catch (_) {
@@ -1453,112 +1136,23 @@ function App() {
                     {tr("noReceiptsYet")}
                   </div>
                 )}
-                {(currentItem.receipts || []).map((r, idx) => {
-                  const required = idx === 0;
-                  const ocrKey = `${currentItem.id}:${r.id}`;
-                  const showOcr = !!ocrExpanded[ocrKey];
-                  return (
-                    <div key={r.id} className="receipt-card">
-                      <div className="card-top">
-                        <div>
-                          {tr("receiptCardTitle")} {idx + 1}{" "}
-                          {required ? (
-                            <span className="badge danger">{tr("badgeRequired")}</span>
-                          ) : (
-                            <span className="badge">{tr("badgeOptional")}</span>
-                          )}
-                          {r.hasMultipleCurrency && (
-                            <span className="badge warn">{tr("badgeMultiCurrency")}</span>
-                          )}
-                        </div>
-                        <button
-                          className="btn danger"
-                          onClick={() => deleteReceipt(currentItem.id, r.id)}
-                        >
-                          {tr("actionDelete")}
-                        </button>
-                      </div>
-                      <div className="card-body">
-                        <div>
-                          <img
-                            className="preview"
-                            src={r.preview || ""}
-                            alt="preview"
-                            onClick={() => r.preview && setModalSrc(r.preview)}
-                          />
-                        </div>
-                        <div className="card-fields">
-
-                          <div className="mini">
-                            <label>
-                              {tr("labelDate")} {required && <span className="reqmark">*</span>}
-                            </label>
-                            <input
-                              type="date"
-                              value={r.date || ""}
-                              onChange={(e) =>
-                                updateReceiptField(currentItem.id, r.id, "date", e.target.value)
-                              }
-                            />
-                          </div>
-                          <div className="mini">
-                            <label>
-                              {tr("labelAmount")} {required && <span className="reqmark">*</span>}
-                              {lang === "ru" && currencyLabel && (
-                                <span className="unit">({currencyLabel})</span>
-                              )}
-                            </label>
-                            <input
-                              type="text"
-                              value={r.amount ? formatNumber(r.amount) : ""}
-                              placeholder="0"
-                              onChange={(e) =>
-                                updateReceiptField(
-                                  currentItem.id,
-                                  r.id,
-                                  "amount",
-                                  parseAmountFromInput(e.target.value)
-                                )
-                              }
-                            />
-                          </div>
-                          <div className="mini">
-                            <label>{tr("labelDescription")}</label>
-                            <input
-                              type="text"
-                              value={r.description || ""}
-                              placeholder={tr("phReceiptDesc")}
-                              onChange={(e) =>
-                                updateReceiptField(
-                                  currentItem.id,
-                                  r.id,
-                                  "description",
-                                  e.target.value
-                                )
-                              }
-                            />
-                          </div>
-
-                          {r.rawText ? (
-                            <>
-                              <div
-                                className="ocr-toggle"
-                                onClick={() => toggleOcr(currentItem.id, r.id)}
-                              >
-                                {showOcr ? tr("ocrToggleHide") : tr("ocrToggleShow")}
-                              </div>
-                              {showOcr && <div className="ocr-text">{r.rawText}</div>}
-                            </>
-                          ) : (
-                            <div className="ocr-toggle" style={{ opacity: 0.6 }}>
-                              {tr("ocrNone")}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
+                {(currentItem.receipts || []).map((r, idx) => (
+                  <ReceiptCard
+                    key={r.id}
+                    receipt={r}
+                    index={idx}
+                    lang={lang}
+                    currencyLabel={currencyLabel}
+                    currentItemId={currentItem.id}
+                    ocrExpanded={ocrExpanded}
+                    onToggleOcr={toggleOcr}
+                    onUpdateField={(receiptId, field, value) =>
+                      updateReceiptField(currentItem.id, receiptId, field, value)
+                    }
+                    onDelete={(receiptId) => deleteReceipt(currentItem.id, receiptId)}
+                    onImageClick={setModalSrc}
+                  />
+                ))}
               </div>
 
               <div className="right-actions">
