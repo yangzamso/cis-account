@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """File generation helpers."""
 from __future__ import annotations
 
@@ -122,16 +122,25 @@ def build_crm_text(df: pd.DataFrame, month_value: int | None, year_value: int | 
     return "\n".join(lines).rstrip() + "\n"
 
 
-def build_domestic_text(df: pd.DataFrame, allowed_areas: set, header: str, emoji: str) -> str:
+def build_domestic_text(
+    df: pd.DataFrame,
+    allowed_areas: set,
+    header: str,
+    emoji: str,
+    display_replace: dict[str, str] | None = None,
+) -> str:
     lines: List[str] = []
     if header:
         lines.append(header)
         lines.append("")
+    repl = display_replace or {}
     for area_name, area_df in df.groupby("구역", dropna=False, sort=False):
         normalized_area = re.sub(r"\s+", "", str(area_name))
         if not any(re.search(pattern, normalized_area) for pattern in allowed_areas):
             continue
-        display_area = "미지정구역" if str(area_name) == "미지정구역" else area_name
+        display_area = "미지정구역" if str(area_name) == "미지정구역" else str(area_name)
+        for old, new in repl.items():
+            display_area = display_area.replace(old, new)
         lines.append(f"{emoji} {display_area}")
         for _, row in area_df.iterrows():
             name = str(row.get("이름(KR)", ""))

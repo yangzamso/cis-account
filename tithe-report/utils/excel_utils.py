@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """Excel-related utility functions."""
 from __future__ import annotations
 
@@ -8,7 +8,8 @@ from io import BytesIO
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import pandas as pd
-from openpyxl.styles import Font, PatternFill
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 from config import NAME_KR_WIDTH, NAME_RU_WIDTH
@@ -254,4 +255,98 @@ def to_excel_multi_bytes(sheets: Sequence[Tuple[str, pd.DataFrame]]) -> bytes:
             df.to_excel(writer, index=False, sheet_name=sheet_name)
             ws = writer.book[sheet_name]
             apply_sheet_style(ws, df)
+    return output.getvalue()
+
+
+def _report_column_widths(include_dept: bool) -> List[int]:
+    """순번6, 언어권6, [부서6], 이름18, 고유번호18, 회비10, 체육10, 미납10, 십일조10, 미납10."""
+    base = [6, 6]
+    if include_dept:
+        base.append(6)
+    base.extend([18, 18, 10, 10, 10, 10, 10])
+    return base
+
+
+def _report_number_col_indices(include_dept: bool) -> Tuple[int, ...]:
+    """1-based column indices for 회비, 체육회비 (오른쪽 정렬, 콤마)."""
+    return (6, 7) if include_dept else (5, 6)
+
+
+def to_report_excel_bytes(
+    title: str,
+    headers: List[str],
+    data_rows: List[List[Any]],
+    sheet_name: str = "Sheet1",
+    include_dept: bool = False,
+) -> bytes:
+    """Report Excel: row 1 title (16pt, center, bold), row 2 empty, row 3 headers, row 4+ data.
+    열너비·가운데/오른쪽 정렬·회비체육 숫자·테두리 적용."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = sheet_name
+
+    ncols = max(len(headers), 1)
+    if data_rows:
+        ncols = max(ncols, len(data_rows[0]) if data_rows[0] else 0)
+    end_col = get_column_letter(ncols)
+    widths = _report_column_widths(include_dept)
+    name_col_idx = 4 if include_dept else 3
+    max_name_len = 0
+    label_rows = {"장년회", "청년회"}
+    for row in data_rows:
+        if not row or row[0] in label_rows or len(row) < name_col_idx:
+            continue
+        val = row[name_col_idx - 1]
+        if val is None:
+            continue
+        max_name_len = max(max_name_len, len(str(val)))
+    if max_name_len:
+        widths[name_col_idx - 1] = min(max(max_name_len + 2, widths[name_col_idx - 1]), 60)
+    num_cols = _report_number_col_indices(include_dept)
+    thin = Side(border_style="thin", color="000000")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    center = Alignment(horizontal="center", vertical="center")
+    right = Alignment(horizontal="right", vertical="center")
+
+    ws["A1"] = title
+    ws.merge_cells(f"A1:{end_col}1")
+    ws["A1"].font = Font(size=16, bold=True)
+    ws["A1"].alignment = center
+    for c in range(1, ncols + 1):
+        ws.cell(row=2, column=c, value=None)
+
+    header_fill = PatternFill(fill_type="solid", fgColor="FFFF00")
+    for c, h in enumerate(headers, start=1):
+        cell = ws.cell(row=3, column=c, value=h)
+        cell.font = Font(size=10, bold=True)
+        cell.fill = header_fill
+        cell.alignment = center
+        cell.border = border
+    label_rows = {"장년회", "청년회"}
+    label_fill = PatternFill(fill_type="solid", fgColor="DCE6F1")
+    for r, row in enumerate(data_rows, start=4):
+        is_label = bool(row) and row[0] in label_rows
+        for c, v in enumerate(row, start=1):
+            cell = ws.cell(row=r, column=c, value=v if c == 1 or not is_label else None)
+            if is_label:
+                cell.font = Font(size=14, bold=True)
+                cell.alignment = Alignment(horizontal="left", vertical="center")
+                cell.fill = label_fill
+                left_side = thin if c == 1 else None
+                right_side = thin if c == ncols else None
+                cell.border = Border(left=left_side, right=right_side, top=thin, bottom=thin)
+            else:
+                cell.font = Font(size=10)
+                cell.alignment = right if c in num_cols else center
+                if c in num_cols and v is not None:
+                    cell.number_format = "#,##0"
+                cell.border = border
+
+    for col_idx, w in enumerate(widths, start=1):
+        if col_idx <= ncols:
+            ws.column_dimensions[get_column_letter(col_idx)].width = w
+    ws.freeze_panes = "A4"
+
+    output = BytesIO()
+    wb.save(output)
     return output.getvalue()

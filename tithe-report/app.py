@@ -22,6 +22,9 @@ def main() -> None:
     render_report_placeholder = cast(
         Callable[[], None], _load_callable("ui.report", "render_report_placeholder")
     )
+    render_annual_stats = cast(
+        Callable[[], None], _load_callable("ui.annual_stats", "render_annual_stats")
+    )
 
     setup_page()
     menu = render_menu()
@@ -31,6 +34,8 @@ def main() -> None:
         render_merge()
     elif menu == "보고 자료 생성":
         render_report_placeholder()
+    elif menu == "연간 통계":
+        render_annual_stats()
 
 
 if __name__ == "__main__":

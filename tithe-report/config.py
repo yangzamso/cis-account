@@ -22,6 +22,7 @@ MENU_OPTIONS = [
     "취합 파일 생성",
     "파일 병합",
     "보고 자료 생성",
+    "연간 통계",
 ]
 
 FILE_GEN_REQUIRED_COLUMNS = [

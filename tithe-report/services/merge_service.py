@@ -57,8 +57,18 @@ def _find_col_by_keyword(columns: Sequence[str], keyword: str) -> Optional[str]:
     return None
 
 
+def _normalize_o_markers(series: pd.Series) -> pd.Series:
+    markers = {"o", "O", "○", "◯", "⭕", "〇", "ㅇ"}
+    text = series.astype(str).str.strip()
+    mask = text.isin(markers)
+    if mask.any():
+        series = series.copy()
+        series.loc[mask] = 1
+    return series
+
+
 def _normalize_merge_df(df: pd.DataFrame) -> pd.DataFrame:
-    amount_col = _find_col_by_keyword(df.columns, "금액")
+    amount_col = _find_col_by_keyword(df.columns, "금액") or _find_col_by_keyword(df.columns, "십일조")
     memo_col = _find_col_by_keyword(df.columns, "메모")
     attendance_col = _find_col_by_keyword(df.columns, "출결")
     team_col = pick_column(df, ["팀", "국가"])
@@ -79,6 +89,7 @@ def _normalize_merge_df(df: pd.DataFrame) -> pd.DataFrame:
     if "출결여부" not in df.columns:
         df["출결여부"] = pd.NA
 
+    df["금액"] = _normalize_o_markers(df["금액"])
     df["금액"] = clean_amount_vectorized(df["금액"])
     return df
 
@@ -185,7 +196,7 @@ def compute_merge_views(raw_df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFram
             ("이름(KR)", ["이름(KR)", "이름(kr)"]),
             ("이름(RU)", ["이름(RU)", "이름(ru)"]),
             ("출결여부", ["출결여부"]),
-            ("금액", ["금액"]),
+            ("십일조", ["금액"]),
             ("메모", ["메모"]),
         ],
     )
