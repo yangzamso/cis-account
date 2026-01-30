@@ -7,7 +7,13 @@ from typing import Any, List, Optional, Sequence, Tuple
 
 import pandas as pd
 
-from utils.excel_utils import make_unique_columns, normalize_columns, read_excel_smart_bytes, to_report_excel_bytes
+from utils.excel_utils import (
+    find_col_by_keyword,
+    make_unique_columns,
+    normalize_columns,
+    read_excel_smart_bytes,
+    to_report_excel_bytes,
+)
 
 
 REPORT_HEADERS = ["순번", "언어권", "이름", "고유번호", "회비", "체육회비", "미납사유", "십일조", "미납사유"]
@@ -30,17 +36,6 @@ REGION_STATS_ORDER = (
 )
 
 
-def _find_col(columns: Sequence[str], keyword: str, exclude: Optional[str] = None) -> Optional[str]:
-    for col in columns:
-        s = str(col)
-        if keyword not in s:
-            continue
-        if exclude and exclude in s:
-            continue
-        return col
-    return None
-
-
 def _find_col_by_order(columns: Sequence[str], keywords: List[str]) -> List[Optional[str]]:
     """Find first column containing each keyword, each column used at most once."""
     result: List[Optional[str]] = []
@@ -60,7 +55,7 @@ def load_report_source(file_bytes: bytes) -> Optional[pd.DataFrame]:
     """Load Excel from bytes and normalize columns."""
     try:
         df = read_excel_smart_bytes(file_bytes)
-    except Exception:
+    except (ValueError, TypeError, KeyError, OSError, IOError):
         df = pd.read_excel(BytesIO(file_bytes))
     df = normalize_columns(df)
     df = make_unique_columns(df)
@@ -70,24 +65,24 @@ def load_report_source(file_bytes: bytes) -> Optional[pd.DataFrame]:
 def _resolve_report_columns(df: pd.DataFrame) -> Optional[dict]:
     """Resolve source columns for report. Returns dict of output key -> source col name, or None if critical missing."""
     cols = list(df.columns)
-    dept_col = _find_col(cols, "부서")
+    dept_col = find_col_by_keyword(cols, "부서")
     if not dept_col:
         return None
 
-    name_col = _find_col(cols, "이름(KR)") or _find_col(cols, "전체명단") or _find_col(cols, "이름")
-    id_col = _find_col(cols, "고유번호")
+    name_col = find_col_by_keyword(cols, "이름(KR)") or find_col_by_keyword(cols, "전체명단") or find_col_by_keyword(cols, "이름")
+    id_col = find_col_by_keyword(cols, "고유번호")
     if not name_col or not id_col:
         return None
 
-    region_col = _find_col(cols, "지역")
-    fee_col = _find_col(cols, "회비", exclude="체육")
-    sports_col = _find_col(cols, "체육회비")
-    tithe_col = _find_col(cols, "십일조") or _find_col(cols, "금액")
-    attend_col = _find_col(cols, "출결여부") or _find_col(cols, "출결")
+    region_col = find_col_by_keyword(cols, "지역")
+    fee_col = find_col_by_keyword(cols, "회비", exclude="체육")
+    sports_col = find_col_by_keyword(cols, "체육회비")
+    tithe_col = find_col_by_keyword(cols, "십일조") or find_col_by_keyword(cols, "금액")
+    attend_col = find_col_by_keyword(cols, "출결여부") or find_col_by_keyword(cols, "출결")
 
     unpay1, memo_col = _find_col_by_order(cols, ["미납사유", "메모"])
     if not unpay1:
-        unpay1 = _find_col(cols, "미납사유")
+        unpay1 = find_col_by_keyword(cols, "미납사유")
 
     return {
         "부서": dept_col,

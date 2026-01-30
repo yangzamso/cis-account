@@ -15,6 +15,22 @@ from openpyxl.utils import get_column_letter
 from config import NAME_KR_WIDTH, NAME_RU_WIDTH
 
 
+def find_col_by_keyword(
+    columns: Sequence[str],
+    keyword: str,
+    exclude: Optional[str] = None,
+) -> Optional[str]:
+    """Find first column containing keyword, optionally excluding pattern."""
+    for col in columns:
+        text = str(col)
+        if keyword not in text:
+            continue
+        if exclude and exclude in text:
+            continue
+        return col
+    return None
+
+
 def clean_amount(value: Any) -> Any:
     """Normalize amount values to numeric or NA."""
     if pd.isna(value):

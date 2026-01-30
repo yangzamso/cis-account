@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep:*)",
+      "Bash(python -m py_compile:*)",
+      "Bash(python:*)",
+      "Bash(.venvScriptspython.exe -c \"from services.file_generation_service import *; from services.merge_service import *; from services.translation_service import *; from services.report_service import *; from services.annual_stats_service import *; from utils.excel_utils import *; print\\(''Services/Utils Import Pass''\\)\")",
+      "Bash(venvScriptspython.exe -c \"from services.file_generation_service import *; from services.merge_service import *; from services.translation_service import *; from services.report_service import *; from services.annual_stats_service import *; from utils.excel_utils import *; print\\(''Services/Utils Import Pass''\\)\")",
+      "Bash(./venv/Scripts/python.exe:*)"
+    ]
+  }
+}

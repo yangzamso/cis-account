@@ -10,11 +10,15 @@ import re
 import pandas as pd
 
 from services.report_service import load_report_source, _resolve_report_columns, _parse_paid_amount
+from utils.excel_utils import find_col_by_keyword
+
+# Pre-compiled regex pattern for date parsing
+_YYYYMM_RE = re.compile(r"(\d{2}|\d{4})\.(\d{2})")
 
 
 def _parse_yyyymm_from_name(filename: str) -> Optional[Tuple[int, int]]:
     stem = os.path.splitext(os.path.basename(filename))[0]
-    match = re.search(r"(\d{2}|\d{4})\.(\d{2})", stem)
+    match = _YYYYMM_RE.search(stem)
     if not match:
         return None
     year_text = match.group(1)
@@ -115,17 +119,6 @@ def build_annual_region_table(file_paths: List[str]) -> Tuple[pd.DataFrame, Opti
     return df, target_year, years
 
 
-def _find_col(columns: List[str], keyword: str, exclude: Optional[str] = None) -> Optional[str]:
-    for col in columns:
-        text = str(col)
-        if keyword not in text:
-            continue
-        if exclude and exclude in text:
-            continue
-        return col
-    return None
-
-
 def build_annual_detail_table(file_paths: List[str], target_year: int) -> pd.DataFrame:
     """Build annual detail table: per person with month tithe/memo columns."""
     records: Dict[str, Dict[str, object]] = {}
@@ -144,15 +137,15 @@ def build_annual_detail_table(file_paths: List[str], target_year: int) -> pd.Dat
             continue
 
         cols = list(df.columns)
-        id_col = _find_col(cols, "고유번호")
-        region_col = _find_col(cols, "지역")
-        team_col = _find_col(cols, "팀")
-        dept_col = _find_col(cols, "부서")
-        name_kr_col = _find_col(cols, "이름(KR)") or _find_col(cols, "이름")
-        name_ru_col = _find_col(cols, "이름(RU)") or _find_col(cols, "이름(ru)")
-        attend_col = _find_col(cols, "출결여부") or _find_col(cols, "출결")
-        tithe_col = _find_col(cols, "십일조") or _find_col(cols, "금액")
-        memo_col = _find_col(cols, "메모") or _find_col(cols, "미납사유")
+        id_col = find_col_by_keyword(cols, "고유번호")
+        region_col = find_col_by_keyword(cols, "지역")
+        team_col = find_col_by_keyword(cols, "팀")
+        dept_col = find_col_by_keyword(cols, "부서")
+        name_kr_col = find_col_by_keyword(cols, "이름(KR)") or find_col_by_keyword(cols, "이름")
+        name_ru_col = find_col_by_keyword(cols, "이름(RU)") or find_col_by_keyword(cols, "이름(ru)")
+        attend_col = find_col_by_keyword(cols, "출결여부") or find_col_by_keyword(cols, "출결")
+        tithe_col = find_col_by_keyword(cols, "십일조") or find_col_by_keyword(cols, "금액")
+        memo_col = find_col_by_keyword(cols, "메모") or find_col_by_keyword(cols, "미납사유")
 
         for idx, row in df.iterrows():
             key = str(row.get(id_col, "")).strip() if id_col else ""

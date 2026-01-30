@@ -78,3 +78,7 @@ EXCEL_CONFIG: Dict[str, int] = {
 }
 
 MERGE_OUTPUT_FILENAME_PATTERN = "전체-CIS-TITHE-{yy_mm}.xlsx"
+
+# Processing thresholds
+LARGE_FILE_THRESHOLD_BYTES = 10 * 1024 * 1024  # 10MB
+TRANSLATION_BATCH_SIZE = 20

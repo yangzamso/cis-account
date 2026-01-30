@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import pandas as pd
 import streamlit as st
 
-from config import MERGE_OUTPUT_FILENAME_PATTERN
+from config import LARGE_FILE_THRESHOLD_BYTES, MERGE_OUTPUT_FILENAME_PATTERN
 from utils.excel_utils import (
     clean_amount_vectorized,
     list_excel_files,
@@ -67,6 +67,21 @@ def _normalize_o_markers(series: pd.Series) -> pd.Series:
     return series
 
 
+def _normalize_member_id(series: pd.Series) -> pd.Series:
+    """Normalize member id values to reduce whitespace/hidden-char mismatches."""
+    if series.empty:
+        return series
+    text = series.astype(str)
+    text = text.str.replace("\ufeff", "", regex=False)
+    text = text.str.replace("\u200b", "", regex=False)
+    text = text.str.replace("\xa0", " ", regex=False)
+    text = text.str.replace(r"[‐‑‒–—―−]", "-", regex=True)
+    text = text.str.strip()
+    text = text.str.replace(" ", "", regex=False)
+    text = text.where(~text.str.lower().isin({"", "nan", "none"}), pd.NA)
+    return text
+
+
 def _normalize_merge_df(df: pd.DataFrame) -> pd.DataFrame:
     amount_col = _find_col_by_keyword(df.columns, "금액") or _find_col_by_keyword(df.columns, "십일조")
     memo_col = _find_col_by_keyword(df.columns, "메모")
@@ -88,6 +103,9 @@ def _normalize_merge_df(df: pd.DataFrame) -> pd.DataFrame:
         df["메모"] = pd.NA
     if "출결여부" not in df.columns:
         df["출결여부"] = pd.NA
+
+    if "고유번호" in df.columns:
+        df["고유번호"] = _normalize_member_id(df["고유번호"])
 
     df["금액"] = _normalize_o_markers(df["금액"])
     df["금액"] = clean_amount_vectorized(df["금액"])
@@ -111,6 +129,8 @@ def _read_excel_maybe_chunked(file_path: str, chunksize: int = 1000) -> pd.DataF
 
 def build_merge_frames(file_items: Sequence[Tuple[str, bytes]]) -> List[pd.DataFrame]:
     """Parse Excel files into normalized dataframes for merge."""
+    if not file_items:
+        return []
     frames: List[pd.DataFrame] = []
     for file_name, file_bytes in file_items:
         try:
@@ -131,11 +151,13 @@ def build_merge_frames(file_items: Sequence[Tuple[str, bytes]]) -> List[pd.DataF
 
 def build_merge_frames_from_paths(file_paths: Sequence[str]) -> List[pd.DataFrame]:
     """Parse Excel files from paths with chunking for large files."""
+    if not file_paths:
+        return []
     frames: List[pd.DataFrame] = []
     for file_path in file_paths:
         try:
             file_size = os.path.getsize(file_path)
-            if file_size >= 10 * 1024 * 1024:
+            if file_size >= LARGE_FILE_THRESHOLD_BYTES:
                 df = _read_excel_maybe_chunked(file_path)
             else:
                 df = read_excel_smart_path(file_path)
@@ -188,18 +210,27 @@ def compute_merge_views(raw_df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFram
     merged_view = build_view(
         merged_df,
         [
-            ("지역", ["지역"]),
             ("고유번호", ["고유번호"]),
+            ("지역", ["지역"]),
             ("팀", ["팀"]),
             ("구역", ["구역"]),
             ("부서", ["부서"]),
             ("이름(KR)", ["이름(KR)", "이름(kr)"]),
             ("이름(RU)", ["이름(RU)", "이름(ru)"]),
-            ("출결여부", ["출결여부"]),
+            ("출결여부", ["출결여부", "출결"]),
             ("십일조", ["금액"]),
             ("메모", ["메모"]),
+            ("회비", ["회비"]),
+            ("체육회비", ["체육회비"]),
+            ("미납사유", ["미납사유"]),
         ],
     )
+    merged_view = merged_view.sort_values(
+        by=["지역", "구역", "부서"],
+        ascending=[True, True, True],
+        na_position="last",
+        kind="stable",
+    ).reset_index(drop=True)
 
     return duplicate_report_view, merged_view
 

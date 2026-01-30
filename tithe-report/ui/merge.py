@@ -159,7 +159,8 @@ def _render_translation(raw_df: Optional[pd.DataFrame], folder_batch_mode: bool,
                 if folder_batch_mode:
                     st.success("번역 설정이 저장되었습니다. 저장 시 반영됩니다.")
                 else:
-                    raw_df = translate_memos(raw_df, api_key_input, model_name)
+                    with st.spinner("번역 중..."):
+                        raw_df = translate_memos(raw_df, api_key_input, model_name)
                     if input_mode == "폴더 지정":
                         st.session_state["folder_merge_raw_df"] = raw_df
                     st.success("번역을 완료했습니다.")

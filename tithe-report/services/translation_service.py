@@ -9,6 +9,8 @@ from typing import Any, Dict, List
 import pandas as pd
 import streamlit as st
 
+from config import TRANSLATION_BATCH_SIZE
+
 try:
     import google.generativeai as genai
 except (ImportError, ModuleNotFoundError):  # pragma: no cover
@@ -49,7 +51,9 @@ def translate_batch(api_key: str, model_name: str, items: List[str]) -> List[str
         f"Texts:\n{json.dumps(items, ensure_ascii=False)}"
     )
     response = model.generate_content(prompt)
-    text = response.text.strip()
+    text = (response.text or "").strip()
+    if not text:
+        raise RuntimeError("번역 응답이 비어있습니다. 잠시 후 다시 시도해주세요.")
     try:
         return json.loads(text)
     except json.JSONDecodeError:
@@ -58,8 +62,8 @@ def translate_batch(api_key: str, model_name: str, items: List[str]) -> List[str
             try:
                 return json.loads(match.group(0))
             except json.JSONDecodeError as exc:
-                raise ValueError("번역 결과 JSON 파싱에 실패했습니다.") from exc
-        raise
+                raise RuntimeError("번역 응답 파싱에 실패했습니다. 잠시 후 다시 시도해주세요.") from exc
+        raise RuntimeError("번역 응답 형식이 올바르지 않습니다. 잠시 후 다시 시도해주세요.")
 
 
 def translate_memos(
@@ -83,9 +87,12 @@ def translate_memos(
     translations: Dict[str, str] = {}
     progress = st.progress(0.0, text="번역 중...") if use_progress else None
     total = len(unique_targets)
-    for start in range(0, total, 20):
-        batch = unique_targets[start : start + 20]
-        translated = translate_batch(api_key, model_name, batch)
+    for start in range(0, total, TRANSLATION_BATCH_SIZE):
+        batch = unique_targets[start : start + TRANSLATION_BATCH_SIZE]
+        try:
+            translated = translate_batch(api_key, model_name, batch)
+        except (RuntimeError, ValueError, TypeError) as exc:
+            raise RuntimeError(f"번역 응답 오류: {exc}") from exc
         for src, dst in zip(batch, translated):
             translations[src] = dst
         if progress is not None:

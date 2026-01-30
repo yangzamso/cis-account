@@ -2,9 +2,11 @@
 """Report UI."""
 from __future__ import annotations
 
+import logging
 from datetime import date
 import os
 import re
+from typing import Optional
 
 import pandas as pd
 import streamlit as st
@@ -24,11 +26,13 @@ from services.report_service import (
     load_report_source,
 )
 
+LOGGER = logging.getLogger(__name__)
+
 
 def render_report_placeholder() -> None:
     """Render placeholder for report mode."""
     left_col, right_col = st.columns([1, 2], gap="large")
-    region: str | None = None
+    region: Optional[str] = None
     year_val: int = date.today().year
     month_val: int = date.today().month
 
@@ -85,9 +89,14 @@ def render_report_placeholder() -> None:
                 key="report_region",
             )
 
-    raw_df: pd.DataFrame | None = None
+    raw_df: Optional[pd.DataFrame] = None
     if upload is not None:
-        raw_df = load_report_source(upload.getvalue())
+        try:
+            raw_df = load_report_source(upload.getvalue())
+        except (ValueError, TypeError, KeyError, OSError, IOError) as exc:
+            st.error(f"파일을 읽는 중 오류가 발생했습니다: {exc}")
+            LOGGER.exception("파일 읽기 오류")
+            raw_df = None
 
     with right_col:
         tabs = st.tabs(["결과", "미리보기", "원본데이터"])
@@ -103,8 +112,7 @@ def render_report_placeholder() -> None:
                 else:
                     summary_df = build_region_summary(raw_df, col_map, "십일조", exclude_attendance=True)
                     if not summary_df.empty:
-                        st.subheader("통계")
-                        st.write(f"{year_val}년 {month_val}월")
+                        st.subheader(f"십일조 현황 - {year_val}년 {month_val}월")
                         display_df = summary_df.copy()
                         def _ratio_bar(val: float) -> str:
                             blocks = 10
@@ -118,6 +126,7 @@ def render_report_placeholder() -> None:
                             return [""] * len(row)
                         styled = display_df.style.apply(_highlight_total, axis=1)
                         st.dataframe(styled, use_container_width=True, hide_index=True)
+                        st.write("- 출결제외 인원은 포함되지 않았습니다.")
                     st.subheader("십일조 보고 양식")
                     st.write("부서/총인원/납부자/미납자/비율")
                     st.write("출결 제외한 통계입니다.")

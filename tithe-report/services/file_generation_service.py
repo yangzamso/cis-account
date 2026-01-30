@@ -7,13 +7,15 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
-from config import FILE_GEN_OUTPUT_COLUMNS
+# Pre-compiled regex patterns for performance
+_WHITESPACE_RE = re.compile(r"\s+")
+_NON_ALNUM_RE = re.compile(r"[^0-9a-z가-힣]")
 
 
 def normalize_header_key(value: Any) -> str:
     text = str(value).strip().lower()
-    text = re.sub(r"\s+", "", text)
-    text = re.sub(r"[^0-9a-z가-힣]", "", text)
+    text = _WHITESPACE_RE.sub("", text)
+    text = _NON_ALNUM_RE.sub("", text)
     return text
 
 
@@ -72,7 +74,7 @@ def number_to_emoji(num_text: str) -> str:
     return "".join(mapping.get(ch, ch) for ch in num_text)
 
 
-def _crm_title(month_value: int | None, year_value: int | None) -> str:
+def _crm_title(month_value: Optional[int], year_value: Optional[int]) -> str:
     month_names = {
         1: "Январь",
         2: "Февраль",
@@ -97,7 +99,7 @@ def _crm_area_title(area_text: str) -> str:
     return f"Ячейка {number_to_emoji(match.group(0))}" if match else "Ячейка"
 
 
-def build_crm_text(df: pd.DataFrame, month_value: int | None, year_value: int | None) -> str:
+def build_crm_text(df: pd.DataFrame, month_value: Optional[int], year_value: Optional[int]) -> str:
     title = _crm_title(month_value, year_value)
     id_col = find_column_by_key(df, "고유번호") or "고유번호"
     name_col = find_column_by_key(df, "이름(RU)") or "이름(RU)"
@@ -127,7 +129,7 @@ def build_domestic_text(
     allowed_areas: set,
     header: str,
     emoji: str,
-    display_replace: dict[str, str] | None = None,
+    display_replace: Optional[Dict[str, str]] = None,
 ) -> str:
     lines: List[str] = []
     if header:

@@ -2,9 +2,10 @@
 """Annual stats UI."""
 from __future__ import annotations
 
+import logging
 import os
 from datetime import date
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 import pandas as pd
 import streamlit as st
@@ -12,6 +13,8 @@ import streamlit as st
 from services.annual_stats_service import build_annual_region_table, build_annual_detail_table
 from services.file_service import set_folder_in_state
 from utils.excel_utils import list_excel_files, to_excel_bytes
+
+LOGGER = logging.getLogger(__name__)
 
 
 def _render_inputs() -> Tuple[Optional[str], Optional[str], bool]:
@@ -60,12 +63,22 @@ def render_annual_stats() -> None:
             return
 
         source_folder = os.path.abspath(source_folder.strip())
-        file_paths = list_excel_files(source_folder)
+        try:
+            file_paths: List[str] = list_excel_files(source_folder)
+        except (OSError, IOError) as exc:
+            st.error(f"폴더 읽기 중 오류가 발생했습니다: {exc}")
+            LOGGER.exception("폴더 읽기 오류")
+            return
         if not file_paths:
             st.error("폴더에 엑셀 파일이 없습니다.")
             return
 
-        table_df, year_value, years = build_annual_region_table(file_paths)
+        try:
+            table_df, year_value, years = build_annual_region_table(file_paths)
+        except (ValueError, TypeError, KeyError, OSError, IOError) as exc:
+            st.error(f"연간 통계 생성 중 오류가 발생했습니다: {exc}")
+            LOGGER.exception("연간 통계 생성 오류")
+            return
         if table_df.empty:
             if years and len(years) > 1:
                 st.warning("서로 다른 연도 파일이 섞여 있습니다. 연간 통계를 생성할 수 없습니다.")
@@ -75,7 +88,12 @@ def render_annual_stats() -> None:
 
         if year_value is None:
             year_value = date.today().year
-        detail_df = build_annual_detail_table(file_paths, year_value)
+        try:
+            detail_df = build_annual_detail_table(file_paths, year_value)
+        except (ValueError, TypeError, KeyError, OSError, IOError) as exc:
+            st.error(f"상세 테이블 생성 중 오류가 발생했습니다: {exc}")
+            LOGGER.exception("상세 테이블 생성 오류")
+            return
         if not detail_df.empty:
             sort_cols = [c for c in ["지역", "팀"] if c in detail_df.columns]
             if sort_cols:
