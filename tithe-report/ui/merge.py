@@ -27,6 +27,25 @@ from utils.excel_utils import list_excel_files, list_yyyymm_subfolders, to_excel
 LOGGER = logging.getLogger(__name__)
 
 
+def _validate_google_api_key(api_key: str) -> Tuple[bool, str]:
+    """Google API 키 형식 검증.
+
+    Google API 키는 'AIza'로 시작하고 39자입니다.
+    """
+    if not api_key:
+        return True, ""
+
+    api_key = api_key.strip()
+
+    if not api_key.startswith("AIza"):
+        return False, "API 키 형식이 맞지 않습니다. Google API 키는 'AIza'로 시작해야 합니다."
+
+    if len(api_key) != 39:
+        return False, f"API 키 형식이 맞지 않습니다. (현재: {len(api_key)}자, 필요: 39자)"
+
+    return True, ""
+
+
 def _extract_zip_to_temp(zip_file) -> str:
     """ZIP 파일을 임시 폴더에 압축 해제하고 경로 반환."""
     temp_dir = tempfile.mkdtemp()
@@ -45,7 +64,7 @@ def _render_file_upload() -> Tuple[Optional[pd.DataFrame], Optional[str], bool]:
     )
 
     if not uploaded_files:
-        st.info("ZIP 파일 또는 엑셀 파일을 업로드하면 결과가 표시됩니다.")
+        st.info("엑셀 파일을 업로드하면 결과가 표시됩니다.")
         return None, None, False
 
     # ZIP 파일이 있는지 확인
@@ -133,14 +152,28 @@ def _render_date_selector(folder_batch_mode: bool, raw_df: Optional[pd.DataFrame
     return f"{year_value}.{month_value:02d}"
 
 
-def _render_translation(raw_df: Optional[pd.DataFrame], folder_batch_mode: bool) -> Optional[pd.DataFrame]:
+def _render_translation(raw_df: Optional[pd.DataFrame], folder_batch_mode: bool) -> Tuple[Optional[pd.DataFrame], bool]:
+    """번역 설정 UI와 버튼 2개 (번역 실행, 건너뛰기) 렌더링.
+
+    Returns:
+        (raw_df, proceed_merge): proceed_merge=True면 병합 진행 (번역 완료 또는 건너뛰기)
+    """
     st.subheader("3) 번역 설정 (선택)")
     api_key_input = st.text_input("Gemini API 키", type="password", key="merge_api_key").strip()
     model_name: Optional[str] = None
     model_state_key = "merge_translate_model_input"
+    proceed_merge = False
 
-    # API 키가 입력되면 모델 선택 UI 표시
+    # API 키 형식 검증
+    api_key_valid = True
     if api_key_input:
+        is_valid, error_msg = _validate_google_api_key(api_key_input)
+        if not is_valid:
+            st.error(error_msg)
+            api_key_valid = False
+
+    # API 키가 입력되고 유효하면 모델 선택 UI 표시
+    if api_key_input and api_key_valid:
         # 모델 목록 조회 시도 (실패해도 직접 입력 가능)
         available_models = []
         try:
@@ -154,25 +187,57 @@ def _render_translation(raw_df: Optional[pd.DataFrame], folder_batch_mode: bool)
             model_name = st.selectbox("번역 모델 선택", available_models, index=0, key="merge_translate_model")
         else:
             model_name = st.text_input("번역 모델명 직접 입력", value="gemini-2.0-flash", help="API 키 확인 후 모델명을 입력하세요.", key="merge_translate_model_input")
+
     memo_available = raw_df is not None and "메모" in raw_df.columns
-    if api_key_input and (memo_available or folder_batch_mode):
-        if st.button("번역 실행", on_click=set_merge_translate_state, args=(model_state_key, "merge_api_key")):
+
+    # 버튼 2개: 번역 실행, 건너뛰기
+    btn_col1, btn_col2 = st.columns(2)
+
+    with btn_col1:
+        # 번역 실행 버튼 - API 키 입력 후에만 활성화
+        translate_btn_disabled = not (api_key_input and api_key_valid)
+        translate_clicked = st.button(
+            "번역 실행",
+            disabled=translate_btn_disabled,
+            key="merge_translate_btn",
+            on_click=set_merge_translate_state,
+            args=(model_state_key, "merge_api_key"),
+        )
+
+    with btn_col2:
+        skip_clicked = st.button("건너뛰기", key="merge_skip_btn")
+
+    if translate_clicked and api_key_input and api_key_valid and model_name:
+        if folder_batch_mode:
+            st.success("번역 설정이 저장되었습니다. 저장 시 반영됩니다.")
+            proceed_merge = True
+        elif memo_available:
             try:
-                if not model_name:
-                    raise RuntimeError("사용 가능한 모델을 찾지 못했습니다.")
-                if folder_batch_mode:
-                    st.success("번역 설정이 저장되었습니다. 저장 시 반영됩니다.")
-                else:
-                    with st.spinner("번역 중..."):
-                        raw_df = translate_memos(raw_df, api_key_input, model_name)
-                    st.session_state["folder_merge_raw_df"] = raw_df
-                    st.success("번역을 완료했습니다.")
+                with st.spinner("번역 중..."):
+                    raw_df = translate_memos(raw_df, api_key_input, model_name)
+                st.session_state["folder_merge_raw_df"] = raw_df
+                st.success("번역을 완료했습니다.")
+                proceed_merge = True
             except (RuntimeError, ValueError, TypeError) as exc:
                 st.error(f"번역 실패: {exc}")
                 LOGGER.exception("Translation failed")
-    elif raw_df is not None and not memo_available:
-        st.info("'메모' 컬럼이 없어 번역을 건너뜁니다.")
-    return raw_df
+            except Exception as exc:
+                # Google API 오류 등 기타 예외 처리
+                error_msg = str(exc)
+                if "API_KEY_INVALID" in error_msg or "API key not valid" in error_msg:
+                    st.error("API 키가 유효하지 않습니다. 올바른 API 키를 입력해주세요.")
+                else:
+                    st.error(f"번역 중 오류가 발생했습니다: {exc}")
+                LOGGER.exception("Translation failed with unexpected error")
+        else:
+            st.info("'메모' 컬럼이 없어 번역을 건너뜁니다.")
+            proceed_merge = True
+
+    if skip_clicked:
+        proceed_merge = True
+        st.info("번역을 건너뛰고 병합을 진행합니다.")
+
+    return raw_df, proceed_merge
 
 
 def _render_download_tab(
@@ -258,23 +323,38 @@ def render_merge() -> None:
     merged_view: Optional[pd.DataFrame] = None
     temp_dir: Optional[str] = None
     folder_batch_mode: bool = False
+    proceed_merge: bool = False
 
     with left_col:
         raw_df, temp_dir, folder_batch_mode = _render_file_upload()
-        yy_mm = _render_date_selector(folder_batch_mode, raw_df)
-        raw_df = _render_translation(raw_df, folder_batch_mode)
-        if not folder_batch_mode and raw_df is not None:
-            try:
-                duplicate_report_view, merged_view = compute_merge_views(raw_df)
-            except (KeyError, ValueError, TypeError) as exc:
-                st.error(f"병합 처리 중 오류가 발생했습니다: {exc}")
-                LOGGER.exception("Failed to compute merge views")
+
+        # 파일 업로드 후에만 날짜/번역 설정 표시
+        if raw_df is not None or folder_batch_mode:
+            yy_mm = _render_date_selector(folder_batch_mode, raw_df)
+            raw_df, proceed_merge = _render_translation(raw_df, folder_batch_mode)
+
+            # 번역 실행 또는 건너뛰기 후에 병합 처리
+            if proceed_merge and not folder_batch_mode and raw_df is not None:
+                try:
+                    duplicate_report_view, merged_view = compute_merge_views(raw_df)
+                except (KeyError, ValueError, TypeError) as exc:
+                    st.error(f"병합 처리 중 오류가 발생했습니다: {exc}")
+                    LOGGER.exception("Failed to compute merge views")
 
     with right_col:
         tabs = st.tabs(["병합결과", "원본데이터"])
-        if (duplicate_report_view is None or merged_view is None or yy_mm is None) and not folder_batch_mode:
+        # 파일 미업로드 상태
+        if raw_df is None and not folder_batch_mode:
             with tabs[0]:
-                st.info("파일 업로드와 날짜/번역 설정을 완료해주세요.")
+                st.info("엑셀 파일을 업로드해주세요.")
+            return
+        # 파일 업로드 후 버튼 미클릭 상태
+        if not proceed_merge and not folder_batch_mode:
+            with tabs[0]:
+                st.info("'번역 실행' 또는 '건너뛰기' 버튼을 눌러주세요.")
+            with tabs[1]:
+                st.write("원본 데이터")
+                st.dataframe(raw_df.head(50) if raw_df is not None else pd.DataFrame())
             return
         with tabs[0]:
             _render_download_tab(yy_mm, folder_batch_mode, temp_dir, merged_view, duplicate_report_view)

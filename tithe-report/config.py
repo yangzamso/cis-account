@@ -36,6 +36,7 @@ FILE_GEN_REQUIRED_COLUMNS = [
 ]
 
 FILE_GEN_OUTPUT_COLUMNS = [
+    "번호",
     "고유번호",
     "지역",
     "팀",

@@ -33,6 +33,7 @@ def find_column_by_key(df: pd.DataFrame, target: str) -> Optional[str]:
 
 def build_overseas_output(df: pd.DataFrame) -> pd.DataFrame:
     required = [
+        "번호",
         "고유번호",
         "지역",
         "팀",
@@ -46,6 +47,8 @@ def build_overseas_output(df: pd.DataFrame) -> pd.DataFrame:
     for label in required:
         if label == "팀":
             col = find_column_by_key(df, "팀") or find_column_by_key(df, "국가")
+        elif label == "번호":
+            col = find_column_by_key(df, "번호") or find_column_by_key(df, "No")
         else:
             col = find_column_by_key(df, label)
         if col:

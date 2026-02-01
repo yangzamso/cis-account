@@ -210,6 +210,7 @@ def compute_merge_views(raw_df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFram
     merged_view = build_view(
         merged_df,
         [
+            ("번호", ["번호", "No", "순번"]),
             ("고유번호", ["고유번호"]),
             ("지역", ["지역"]),
             ("팀", ["팀"]),
@@ -225,12 +226,16 @@ def compute_merge_views(raw_df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFram
             ("미납사유", ["미납사유"]),
         ],
     )
+
+    # 번호열을 숫자로 변환 후 정렬 (문자열 정렬 방지)
+    merged_view["__sort_key"] = pd.to_numeric(merged_view["번호"], errors="coerce")
     merged_view = merged_view.sort_values(
-        by=["지역", "구역", "부서"],
-        ascending=[True, True, True],
+        by=["__sort_key"],
+        ascending=[True],
         na_position="last",
         kind="stable",
     ).reset_index(drop=True)
+    merged_view = merged_view.drop(columns=["__sort_key"])
 
     return duplicate_report_view, merged_view
 

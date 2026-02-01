@@ -89,6 +89,19 @@ def _render_left_panel(required_aliases: Dict[str, List[str]]) -> Tuple[Optional
 
 def _build_standardized_df(source_df: pd.DataFrame, rename_map: Dict[str, str]) -> pd.DataFrame:
     standardized_df = source_df.rename(columns=rename_map).copy()
+
+    # 번호 컬럼 처리 - 원본에 있으면 사용, 없으면 빈값
+    if "번호" not in standardized_df.columns:
+        number_col = None
+        for col in source_df.columns:
+            col_str = str(col).lower().strip()
+            if col_str in ("번호", "no", "no.", "순번"):
+                number_col = col
+                break
+        if number_col:
+            standardized_df["번호"] = source_df[number_col]
+        # 없으면 reindex에서 fill_value=pd.NA로 빈값 처리됨
+
     for col in source_df.columns:
         if "출결" in str(col) and "출결여부" not in standardized_df.columns:
             standardized_df["출결여부"] = source_df[col]
@@ -219,7 +232,14 @@ def _render_domestic_text(standardized_df: pd.DataFrame) -> None:
 
 def _render_domestic_download(output_df: pd.DataFrame, yy_mm: str) -> None:
     hide_rows = ~output_df["지역"].astype(str).str.contains("국내", na=False)
-    kor_bytes = to_excel_bytes(output_df, sheet_name="tithe", autofilter={"column": "지역", "value": "국내"}, hide_rows=hide_rows)
+
+    # KOR 파일에만 회비/체육회비/미납사유 3개 열 추가 (빈 데이터)
+    kor_df = output_df.copy()
+    kor_df["회비"] = pd.NA
+    kor_df["체육회비"] = pd.NA
+    kor_df["미납사유"] = pd.NA
+
+    kor_bytes = to_excel_bytes(kor_df, sheet_name="tithe", autofilter={"column": "지역", "value": "국내"}, hide_rows=hide_rows)
     st.download_button("지역명 XLSX 다운로드", data=kor_bytes, file_name=f"CIS-TITHE-KOR-{yy_mm}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"kor_template_{yy_mm}")
 
 
