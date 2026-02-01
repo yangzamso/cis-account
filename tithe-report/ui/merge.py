@@ -137,19 +137,23 @@ def _render_translation(raw_df: Optional[pd.DataFrame], folder_batch_mode: bool)
     st.subheader("3) 번역 설정 (선택)")
     api_key_input = st.text_input("Gemini API 키", type="password", key="merge_api_key").strip()
     model_name: Optional[str] = None
-    model_state_key = "merge_translate_model"
+    model_state_key = "merge_translate_model_input"
+
+    # API 키가 입력되면 모델 선택 UI 표시
     if api_key_input:
+        # 모델 목록 조회 시도 (실패해도 직접 입력 가능)
+        available_models = []
         try:
             available_models = list_text_models(api_key_input)
-        except (RuntimeError, ValueError, TypeError, AttributeError) as exc:
-            st.error(f"모델 목록 조회 실패: {exc}")
-            LOGGER.exception("Failed to list models")
-            available_models = []
+        except Exception:
+            # API 키가 유효하지 않거나 네트워크 오류 등 - 무시하고 직접 입력 모드로
+            pass
+
         if available_models:
+            model_state_key = "merge_translate_model"
             model_name = st.selectbox("번역 모델 선택", available_models, index=0, key="merge_translate_model")
         else:
-            model_state_key = "merge_translate_model_input"
-            model_name = st.text_input("번역 모델명 직접 입력", value="gemini-2.5-flash", help="모델 목록을 가져오지 못했으면 직접 입력하세요.", key="merge_translate_model_input")
+            model_name = st.text_input("번역 모델명 직접 입력", value="gemini-2.0-flash", help="API 키 확인 후 모델명을 입력하세요.", key="merge_translate_model_input")
     memo_available = raw_df is not None and "메모" in raw_df.columns
     if api_key_input and (memo_available or folder_batch_mode):
         if st.button("번역 실행", on_click=set_merge_translate_state, args=(model_state_key, "merge_api_key")):
