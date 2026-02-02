@@ -55,7 +55,7 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 RECEIPT_RETENTION_HOURS = int(os.getenv("RECEIPT_RETENTION_HOURS", "3"))
 
-MODEL_NAME = "gemini-2.0-flash-exp"
+MODEL_NAME = "gemini-2.5-flash"
 
 
 # ----------------------------

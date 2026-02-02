@@ -25,7 +25,7 @@ import { apiGetAccounts, apiUploadReceipt, apiOcrFromUpload, apiGenerateDocument
 import ReceiptCard from "./components/ReceiptCard";
 
 // Account database - loaded from server
-let accountDatabase = {};
+// Account database - managed by state
 
 function currencyLabelForItem(item, lang, ruCountryCode) {
   if (lang !== "ru") return t("ko", "currencyWon");
@@ -182,6 +182,8 @@ function App() {
               ...it,
               recipientType: recipientType || RECIPIENT_OTHER,
               recipient,
+              bank: recipientType === RECIPIENT_JINMO ? "우리" : recipientType === RECIPIENT_JIMIN ? "기업" : it.bank,
+              account: recipientType === RECIPIENT_JINMO ? "928-017364-02-101" : recipientType === RECIPIENT_JIMIN ? "133-104009-01-018" : it.account,
               countryCode: it.countryCode || "",
               managerName: it.managerName || "",
               telegramId: it.telegramId || "",
@@ -246,12 +248,10 @@ function App() {
         const model = data?.server_info?.model || "Unknown";
         const ready = !!data?.server_info?.api_ready;
         const status = data?.server_info?.status || (ready ? "OK" : "API Key missing");
-        // Update account database from server
-        if (data?.accounts) {
-          accountDatabase = data.accounts;
+
+        if (mounted) {
+          setServerInfo({ state: "ready", ready, status, model });
         }
-        if (!mounted) return;
-        setServerInfo({ state: "ready", ready, status, model });
       } catch (_) {
         if (!mounted) return;
         setServerInfo({ state: "failed", ready: false, status: "", model: "" });
@@ -498,16 +498,16 @@ function App() {
             const receipts = (it.receipts || []).map((r) =>
               r.id === receiptId
                 ? (() => {
-                    if (r.preview && r.preview.startsWith("blob:")) {
-                      revokePreviewUrl(r.preview);
-                    }
-                    const previewUrl = uploadPreviewUrl(up.fileName);
-                    return {
-                      ...r,
-                      fileName: up.fileName,
-                      preview: previewUrl || r.preview
-                    };
-                  })()
+                  if (r.preview && r.preview.startsWith("blob:")) {
+                    revokePreviewUrl(r.preview);
+                  }
+                  const previewUrl = uploadPreviewUrl(up.fileName);
+                  return {
+                    ...r,
+                    fileName: up.fileName,
+                    preview: previewUrl || r.preview
+                  };
+                })()
                 : r
             );
             return { ...it, receipts };
@@ -658,17 +658,24 @@ function App() {
   function handleRecipientTypeChange(value) {
     if (!currentItem) return;
     if (value === RECIPIENT_JINMO || value === RECIPIENT_JIMIN) {
-      const acc = accountDatabase[value];
+      // Hardcoded account info
+      let acc = { bank: "", account: "" };
+      if (value === RECIPIENT_JINMO) {
+        acc = { bank: "우리", account: "928-017364-02-101" };
+      } else if (value === RECIPIENT_JIMIN) {
+        acc = { bank: "기업", account: "133-104009-01-018" };
+      }
+
       setItems((prev) =>
         prev.map((it) =>
           it.id === currentItem.id
             ? {
-                ...it,
-                recipientType: value,
-                recipient: value,
-                bank: acc?.bank || "",
-                account: acc?.account || ""
-              }
+              ...it,
+              recipientType: value,
+              recipient: value,
+              bank: acc.bank,
+              account: acc.account
+            }
             : it
         )
       );
@@ -677,12 +684,12 @@ function App() {
         prev.map((it) =>
           it.id === currentItem.id
             ? {
-                ...it,
-                recipientType: value,
-                recipient: "",
-                bank: "",
-                account: ""
-              }
+              ...it,
+              recipientType: value,
+              recipient: "",
+              bank: "",
+              account: ""
+            }
             : it
         )
       );
@@ -750,7 +757,7 @@ function App() {
       <main className="layout">
         {(!isMobile || viewMode === "list") && (
           <section className="panel left">
-          <div className="panel-title">{tr("summaryTitle")}</div>
+            <div className="panel-title">{tr("summaryTitle")}</div>
 
             <div className="report-date">
               <label className="report-label">{tr("reportDateLabel")}</label>
@@ -811,7 +818,7 @@ function App() {
                   </tr>
                 ) : (
                   items.map((it, idx) => {
-                  const complete = isItemComplete(it, lang, ruCountryCode);
+                    const complete = isItemComplete(it, lang, ruCountryCode);
                     const selected = currentEditingItemId === it.id;
                     return (
                       <tr
@@ -904,270 +911,270 @@ function App() {
               <div className="empty-state">{tr("emptyStateNoSelection")}</div>
             ) : (
               <div className="editor">
-              {lang === "ko" && (
-                <div className="field">
-                  <label>{tr("descriptionPresetLabel")}</label>
-                  <select
-                    value={
-                      DESCRIPTION_PRESETS_KO.includes(currentItem.description || "")
-                        ? currentItem.description
-                        : "기타"
-                    }
-                    onChange={(e) => handleDescriptionPresetChange(e.target.value)}
-                  >
-                    {DESCRIPTION_PRESETS_KO.map((opt) => (
-                      <option key={opt} value={opt}>
-                        {opt}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              {lang === "ru" && (
-                <div className="field">
-                  <label>
-                    {tr("countryLabel")} <span className="reqmark">*</span>
-                  </label>
-                  <div className="radios">
-                    {COUNTRY_OPTIONS.map((opt) => (
-                      <label key={opt.code}>
-                        <input
-                          type="radio"
-                          name="countryCode"
-                          value={opt.code}
-                          checked={ruCountryCode === opt.code}
-                          onChange={(e) => setCountryForAll(e.target.value)}
-                        />{" "}
-                        {opt.label}
-                      </label>
-                    ))}
-                  </div>
-                  {!ruCountryCode && (
-                    <div className="field-hint error">{tr("valCountry")}</div>
-                  )}
-                </div>
-              )}
-
-              <div className="field">
-                <label>{tr("fieldDescription")}</label>
-                <input
-                  type="text"
-                  value={currentItem.description || ""}
-                  placeholder={tr("phDescription")}
-                  onChange={(e) => updateItemField(currentItem.id, "description", e.target.value)}
-                />
-              </div>
-
-              <div className="field">
-                <label>{tr("fieldDate")}</label>
-                <input
-                  type="date"
-                  value={currentItem.date || ""}
-                  onChange={(e) => updateItemField(currentItem.id, "date", e.target.value)}
-                />
-              </div>
-
-              {lang === "ru" && (
-                <>
+                {lang === "ko" && (
                   <div className="field">
-                    <label>{tr("fieldManagerName")}</label>
-                    <input
-                      type="text"
-                      value={currentItem.managerName || ""}
-                      onChange={(e) =>
-                        updateItemField(currentItem.id, "managerName", e.target.value)
+                    <label>{tr("descriptionPresetLabel")}</label>
+                    <select
+                      value={
+                        DESCRIPTION_PRESETS_KO.includes(currentItem.description || "")
+                          ? currentItem.description
+                          : "기타"
                       }
-                    />
-                  </div>
-
-                  <div className="field">
-                    <label>{tr("fieldTelegramId")}</label>
-                    <input
-                      type="text"
-                      value={currentItem.telegramId || ""}
-                      onChange={(e) =>
-                        updateItemField(currentItem.id, "telegramId", e.target.value)
-                      }
-                    />
-                  </div>
-                </>
-              )}
-
-              {lang !== "ru" && (
-                <div className="field">
-                  <label>{tr("fieldRecipientType")}</label>
-                  <div className="radios">
-                    <label>
-                      <input
-                        type="radio"
-                        name="recipientType"
-                        value={RECIPIENT_OTHER}
-                        checked={currentItem.recipientType === RECIPIENT_OTHER}
-                        onChange={(e) => handleRecipientTypeChange(e.target.value)}
-                      />{" "}
-                      {tr("recipientOther")}
-                    </label>
-                    <label>
-                      <input
-                        type="radio"
-                        name="recipientType"
-                        value={RECIPIENT_JINMO}
-                        checked={currentItem.recipientType === RECIPIENT_JINMO}
-                        onChange={(e) => handleRecipientTypeChange(e.target.value)}
-                      />{" "}
-                      {tr("recipientJinmo")}
-                    </label>
-                    <label>
-                      <input
-                        type="radio"
-                        name="recipientType"
-                        value={RECIPIENT_JIMIN}
-                        checked={currentItem.recipientType === RECIPIENT_JIMIN}
-                        onChange={(e) => handleRecipientTypeChange(e.target.value)}
-                      />{" "}
-                      {tr("recipientJimin")}
-                    </label>
-                  </div>
-                </div>
-              )}
-
-              {lang !== "ru" && (
-                <div className="recipient-box">
-                  <div className="recipient-row">
-                    <div className="field">
-                      <label>{tr("fieldRecipientName")}</label>
-                      <input
-                        type="text"
-                        value={currentItem.recipient || ""}
-                        placeholder={tr("phRecipientName")}
-                        onChange={(e) =>
-                          updateItemField(currentItem.id, "recipient", e.target.value)
-                        }
-                      />
-                      {lang === "ko" && currentItem.recipientType === RECIPIENT_OTHER && (
-                        <div className="field-hint error">
-                          {tr("fieldRecipientNameHelp")}
-                        </div>
-                      )}
-                    </div>
-                    <div className="field">
-                      <label>{tr("fieldBank")}</label>
-                      <input
-                        type="text"
-                        value={currentItem.bank || ""}
-                        placeholder={tr("phBank")}
-                        onChange={(e) => updateItemField(currentItem.id, "bank", e.target.value)}
-                      />
-                    </div>
-                    <div className="field">
-                      <label>{tr("fieldAccount")}</label>
-                      <input
-                        type="text"
-                        value={currentItem.account || ""}
-                        placeholder={tr("phAccount")}
-                        onChange={(e) =>
-                          updateItemField(currentItem.id, "account", e.target.value)
-                        }
-                      />
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              <div className="receipt-header">
-                <div className="receipt-title">{tr("receiptTitle")}</div>
-                <div className="receipt-actions">
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/*"
-                    multiple
-                    hidden
-                    onChange={async (e) => {
-                      console.warn("[upload] input change", e.target?.files?.length || 0);
-                      const files = e.target.files;
-                      if (files && files.length > 0) {
-                        await handleFilesForItem(currentItem.id, files);
-                        e.target.value = "";
-                      } else {
-                        setEditorErrors([tr("msgUploadCanceled")]);
-                      }
-                    }}
-                  />
-                  <button
-                    className="btn primary"
-                    onClick={() => fileInputRef.current?.click()}
-                  >
-                    {tr("btnAddReceipt")}
-                  </button>
-                </div>
-              </div>
-
-              <div
-                className={`dropzone ${dropActive ? "dragover" : ""}`}
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  setDropActive(true);
-                }}
-                onDragLeave={() => setDropActive(false)}
-                onDrop={async (e) => {
-                  e.preventDefault();
-                  setDropActive(false);
-                  console.warn("[upload] drop", e.dataTransfer?.files?.length || 0);
-                  if (!currentItem) {
-                    alert(tr("msgSelectItemBeforeDrop"));
-                    return;
-                  }
-                  const files = e.dataTransfer?.files;
-                  if (files && files.length > 0) {
-                    await handleFilesForItem(currentItem.id, files);
-                  } else {
-                    setEditorErrors([tr("msgUploadCanceled")]);
-                  }
-                }}
-              >
-                {tr("dropzoneText")}
-              </div>
-
-              <div className="receipts">
-                {(!currentItem.receipts || currentItem.receipts.length === 0) && (
-                  <div className="empty-state" style={{ padding: "14px" }}>
-                    {tr("noReceiptsYet")}
+                      onChange={(e) => handleDescriptionPresetChange(e.target.value)}
+                    >
+                      {DESCRIPTION_PRESETS_KO.map((opt) => (
+                        <option key={opt} value={opt}>
+                          {opt}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                 )}
-                {(currentItem.receipts || []).map((r, idx) => (
-                  <ReceiptCard
-                    key={r.id}
-                    receipt={r}
-                    index={idx}
-                    lang={lang}
-                    currencyLabel={currencyLabel}
-                    currentItemId={currentItem.id}
-                    ocrExpanded={ocrExpanded}
-                    onToggleOcr={toggleOcr}
-                    onUpdateField={(receiptId, field, value) =>
-                      updateReceiptField(currentItem.id, receiptId, field, value)
-                    }
-                    onDelete={(receiptId) => deleteReceipt(currentItem.id, receiptId)}
-                    onImageClick={setModalSrc}
+
+                {lang === "ru" && (
+                  <div className="field">
+                    <label>
+                      {tr("countryLabel")} <span className="reqmark">*</span>
+                    </label>
+                    <div className="radios">
+                      {COUNTRY_OPTIONS.map((opt) => (
+                        <label key={opt.code}>
+                          <input
+                            type="radio"
+                            name="countryCode"
+                            value={opt.code}
+                            checked={ruCountryCode === opt.code}
+                            onChange={(e) => setCountryForAll(e.target.value)}
+                          />{" "}
+                          {opt.label}
+                        </label>
+                      ))}
+                    </div>
+                    {!ruCountryCode && (
+                      <div className="field-hint error">{tr("valCountry")}</div>
+                    )}
+                  </div>
+                )}
+
+                <div className="field">
+                  <label>{tr("fieldDescription")}</label>
+                  <input
+                    type="text"
+                    value={currentItem.description || ""}
+                    placeholder={tr("phDescription")}
+                    onChange={(e) => updateItemField(currentItem.id, "description", e.target.value)}
                   />
-                ))}
-              </div>
+                </div>
 
-              <div className="right-actions">
-                <button className="btn success" onClick={handleSaveCurrentItem}>
-                  {tr("btnSaveItem")}
-                </button>
-              </div>
+                <div className="field">
+                  <label>{tr("fieldDate")}</label>
+                  <input
+                    type="date"
+                    value={currentItem.date || ""}
+                    onChange={(e) => updateItemField(currentItem.id, "date", e.target.value)}
+                  />
+                </div>
 
-              {editorErrors.length > 0 && (
-                <div className="errors">
-                  {editorErrors.map((msg, idx) => (
-                    <div key={`${idx}-${msg}`}>• {msg}</div>
+                {lang === "ru" && (
+                  <>
+                    <div className="field">
+                      <label>{tr("fieldManagerName")}</label>
+                      <input
+                        type="text"
+                        value={currentItem.managerName || ""}
+                        onChange={(e) =>
+                          updateItemField(currentItem.id, "managerName", e.target.value)
+                        }
+                      />
+                    </div>
+
+                    <div className="field">
+                      <label>{tr("fieldTelegramId")}</label>
+                      <input
+                        type="text"
+                        value={currentItem.telegramId || ""}
+                        onChange={(e) =>
+                          updateItemField(currentItem.id, "telegramId", e.target.value)
+                        }
+                      />
+                    </div>
+                  </>
+                )}
+
+                {lang !== "ru" && (
+                  <div className="field">
+                    <label>{tr("fieldRecipientType")}</label>
+                    <div className="radios">
+                      <label>
+                        <input
+                          type="radio"
+                          name="recipientType"
+                          value={RECIPIENT_OTHER}
+                          checked={currentItem.recipientType === RECIPIENT_OTHER}
+                          onChange={(e) => handleRecipientTypeChange(e.target.value)}
+                        />{" "}
+                        {tr("recipientOther")}
+                      </label>
+                      <label>
+                        <input
+                          type="radio"
+                          name="recipientType"
+                          value={RECIPIENT_JINMO}
+                          checked={currentItem.recipientType === RECIPIENT_JINMO}
+                          onChange={(e) => handleRecipientTypeChange(e.target.value)}
+                        />{" "}
+                        {tr("recipientJinmo")}
+                      </label>
+                      <label>
+                        <input
+                          type="radio"
+                          name="recipientType"
+                          value={RECIPIENT_JIMIN}
+                          checked={currentItem.recipientType === RECIPIENT_JIMIN}
+                          onChange={(e) => handleRecipientTypeChange(e.target.value)}
+                        />{" "}
+                        {tr("recipientJimin")}
+                      </label>
+                    </div>
+                  </div>
+                )}
+
+                {lang !== "ru" && (
+                  <div className="recipient-box">
+                    <div className="recipient-row">
+                      <div className="field">
+                        <label>{tr("fieldRecipientName")}</label>
+                        <input
+                          type="text"
+                          value={currentItem.recipient || ""}
+                          placeholder={tr("phRecipientName")}
+                          onChange={(e) =>
+                            updateItemField(currentItem.id, "recipient", e.target.value)
+                          }
+                        />
+                        {lang === "ko" && currentItem.recipientType === RECIPIENT_OTHER && (
+                          <div className="field-hint error">
+                            {tr("fieldRecipientNameHelp")}
+                          </div>
+                        )}
+                      </div>
+                      <div className="field">
+                        <label>{tr("fieldBank")}</label>
+                        <input
+                          type="text"
+                          value={currentItem.bank || ""}
+                          placeholder={tr("phBank")}
+                          onChange={(e) => updateItemField(currentItem.id, "bank", e.target.value)}
+                        />
+                      </div>
+                      <div className="field">
+                        <label>{tr("fieldAccount")}</label>
+                        <input
+                          type="text"
+                          value={currentItem.account || ""}
+                          placeholder={tr("phAccount")}
+                          onChange={(e) =>
+                            updateItemField(currentItem.id, "account", e.target.value)
+                          }
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div className="receipt-header">
+                  <div className="receipt-title">{tr("receiptTitle")}</div>
+                  <div className="receipt-actions">
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      hidden
+                      onChange={async (e) => {
+                        console.warn("[upload] input change", e.target?.files?.length || 0);
+                        const files = e.target.files;
+                        if (files && files.length > 0) {
+                          await handleFilesForItem(currentItem.id, files);
+                          e.target.value = "";
+                        } else {
+                          setEditorErrors([tr("msgUploadCanceled")]);
+                        }
+                      }}
+                    />
+                    <button
+                      className="btn primary"
+                      onClick={() => fileInputRef.current?.click()}
+                    >
+                      {tr("btnAddReceipt")}
+                    </button>
+                  </div>
+                </div>
+
+                <div
+                  className={`dropzone ${dropActive ? "dragover" : ""}`}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setDropActive(true);
+                  }}
+                  onDragLeave={() => setDropActive(false)}
+                  onDrop={async (e) => {
+                    e.preventDefault();
+                    setDropActive(false);
+                    console.warn("[upload] drop", e.dataTransfer?.files?.length || 0);
+                    if (!currentItem) {
+                      alert(tr("msgSelectItemBeforeDrop"));
+                      return;
+                    }
+                    const files = e.dataTransfer?.files;
+                    if (files && files.length > 0) {
+                      await handleFilesForItem(currentItem.id, files);
+                    } else {
+                      setEditorErrors([tr("msgUploadCanceled")]);
+                    }
+                  }}
+                >
+                  {tr("dropzoneText")}
+                </div>
+
+                <div className="receipts">
+                  {(!currentItem.receipts || currentItem.receipts.length === 0) && (
+                    <div className="empty-state" style={{ padding: "14px" }}>
+                      {tr("noReceiptsYet")}
+                    </div>
+                  )}
+                  {(currentItem.receipts || []).map((r, idx) => (
+                    <ReceiptCard
+                      key={r.id}
+                      receipt={r}
+                      index={idx}
+                      lang={lang}
+                      currencyLabel={currencyLabel}
+                      currentItemId={currentItem.id}
+                      ocrExpanded={ocrExpanded}
+                      onToggleOcr={toggleOcr}
+                      onUpdateField={(receiptId, field, value) =>
+                        updateReceiptField(currentItem.id, receiptId, field, value)
+                      }
+                      onDelete={(receiptId) => deleteReceipt(currentItem.id, receiptId)}
+                      onImageClick={setModalSrc}
+                    />
                   ))}
                 </div>
-              )}
+
+                <div className="right-actions">
+                  <button className="btn success" onClick={handleSaveCurrentItem}>
+                    {tr("btnSaveItem")}
+                  </button>
+                </div>
+
+                {editorErrors.length > 0 && (
+                  <div className="errors">
+                    {editorErrors.map((msg, idx) => (
+                      <div key={`${idx}-${msg}`}>• {msg}</div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </section>
