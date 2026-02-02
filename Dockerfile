@@ -1,16 +1,34 @@
-FROM python:3.11-slim
+# ---------- Frontend build ----------
+FROM node:20-slim AS frontend
+WORKDIR /app/front
 
+COPY front/package*.json ./
+RUN npm ci
+
+COPY front/ .
+RUN npm run build
+
+
+# ---------- Backend ----------
+FROM python:3.11-slim
 WORKDIR /app
 
-# Install dependencies
-COPY tithe-report/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+ENV PYTHONUNBUFFERED=1
+ENV PORT=8080
 
-# Copy application code
-COPY tithe-report/ .
+# Python deps
+COPY back/requirements.txt /app/back/requirements.txt
+RUN pip install --no-cache-dir -r /app/back/requirements.txt
 
-# Expose port for Cloud Run
+# Backend code
+COPY back /app/back
+
+# Front build output
+COPY --from=frontend /app/front/dist /app/front/dist
+
+# Runtime dirs
+RUN mkdir -p /app/back/uploads /app/back/output
+
 EXPOSE 8080
 
-# Run Streamlit
-CMD ["streamlit", "run", "app.py", "--server.port=8080", "--server.address=0.0.0.0", "--server.headless=true"]
+CMD ["sh", "-c", "uvicorn back.main:app --host 0.0.0.0 --port ${PORT}"]
