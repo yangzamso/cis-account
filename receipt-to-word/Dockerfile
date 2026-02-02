@@ -14,7 +14,7 @@ FROM python:3.11-slim
 WORKDIR /app
 
 ENV PYTHONUNBUFFERED=1
-ENV PORT=8000
+ENV PORT=8080
 
 # Python deps
 COPY back/requirements.txt /app/back/requirements.txt
