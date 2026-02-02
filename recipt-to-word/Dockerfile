@@ -6,6 +6,7 @@ COPY front/package*.json ./
 RUN npm ci
 
 COPY front/ .
+RUN chmod +x node_modules/.bin/vite
 RUN npm run build
 
 
