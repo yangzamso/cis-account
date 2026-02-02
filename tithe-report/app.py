@@ -25,6 +25,9 @@ def main() -> None:
     render_annual_stats = cast(
         Callable[[], None], _load_callable("ui.annual_stats", "render_annual_stats")
     )
+    render_manual = cast(
+        Callable[[], None], _load_callable("ui.manual", "render_manual")
+    )
 
     setup_page()
     menu = render_menu()
@@ -36,6 +39,8 @@ def main() -> None:
         render_report_placeholder()
     elif menu == "연간 통계":
         render_annual_stats()
+    elif menu == "사용 매뉴얼":
+        render_manual()
 
 
 if __name__ == "__main__":
