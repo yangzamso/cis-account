@@ -10,6 +10,7 @@ from typing import Optional
 
 import pandas as pd
 import streamlit as st
+import altair as alt
 
 from services.report_service import (
     DEPT_FILTER_WOMEN,
@@ -21,6 +22,7 @@ from services.report_service import (
     _resolve_report_columns,
     build_region_summary,
     build_report_stats_lines_for_key,
+    build_report_stats_df,
     build_report_excel_bytes,
     filter_domestic_by_region,
     load_report_source,
@@ -102,7 +104,7 @@ def render_report_placeholder() -> None:
         tabs = st.tabs(["결과", "미리보기", "원본데이터"])
         with tabs[0]:
             if upload is None:
-                st.info("엑셀 파일을 업로드해주세요.")
+                pass
             elif region is None:
                 st.info("국내 또는 해외를 선택해주세요.")
             elif region == "해외":
@@ -220,21 +222,69 @@ def render_report_placeholder() -> None:
                         key="report_women",
                     )
                     st.divider()
-                    st.subheader("보고 양식")
-                    st.write("부서/총인원/납부자/미납자/비율")
+                    st.subheader(f"국내 현황 - {year_val}년 {month_val}월")
+                    st.caption("- 자문회는 회비/체육회비 납부대상이 아닙니다.")
+                    # 데이터 및 텍스트 미리 준비
+                    tithe_df = build_report_stats_df(domestic_df, col_map, "십일조")
+                    tithe_lines = build_report_stats_lines_for_key(domestic_df, col_map, "십일조")
+                    
+                    fee_df = build_report_stats_df(domestic_df, col_map, "회비")
+                    fee_lines = build_report_stats_lines_for_key(domestic_df, col_map, "회비")
+                    
+                    sports_df = build_report_stats_df(domestic_df, col_map, "체육회비")
+                    sports_lines = build_report_stats_lines_for_key(domestic_df, col_map, "체육회비")
+
                     col_tithe, col_fee, col_sports = st.columns(3)
+                    
+                    prog_config = {
+                        "비율": st.column_config.ProgressColumn(
+                            "비율",
+                            format="%.1f%%",
+                            min_value=0,
+                            max_value=100,
+                        )
+                    }
+
+                    # 1. 통계 표 (상단)
                     with col_tithe:
                         st.subheader("십일조")
-                        tithe_lines = build_report_stats_lines_for_key(domestic_df, col_map, "십일조")
-                        st.text_area("", value="\n".join(tithe_lines), height=200, key="stats_tithe")
+                        if not tithe_df.empty:
+                            st.dataframe(
+                                tithe_df,
+                                column_config=prog_config,
+                                hide_index=True,
+                                use_container_width=True
+                            )
+
                     with col_fee:
                         st.subheader("회비")
-                        fee_lines = build_report_stats_lines_for_key(domestic_df, col_map, "회비")
-                        st.text_area("", value="\n".join(fee_lines), height=200, key="stats_fee")
+                        if not fee_df.empty:
+                            st.dataframe(
+                                fee_df,
+                                column_config=prog_config,
+                                hide_index=True,
+                                use_container_width=True
+                            )
+
                     with col_sports:
                         st.subheader("체육회비")
-                        sports_lines = build_report_stats_lines_for_key(domestic_df, col_map, "체육회비")
-                        st.text_area("", value="\n".join(sports_lines), height=200, key="stats_sports")
+                        if not sports_df.empty:
+                            st.dataframe(
+                                sports_df,
+                                column_config=prog_config,
+                                hide_index=True,
+                                use_container_width=True
+                            )
+
+                    # 2. 텍스트 보고 양식 (하단)
+                    st.markdown("###### 텍스트 보고 양식")
+                    t1, t2, t3 = st.columns(3)
+                    with t1:
+                        st.text_area("십일조", value="\n".join(tithe_lines), height=200, key="stats_tithe", label_visibility="collapsed")
+                    with t2:
+                        st.text_area("회비", value="\n".join(fee_lines), height=200, key="stats_fee", label_visibility="collapsed")
+                    with t3:
+                        st.text_area("체육회비", value="\n".join(sports_lines), height=200, key="stats_sports", label_visibility="collapsed")
 
         with tabs[1]:
             if raw_df is not None:

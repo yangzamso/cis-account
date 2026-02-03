@@ -145,22 +145,25 @@ def _build_region_files(overseas_df: pd.DataFrame, yy_mm: str, year_value: int, 
 
 
 def _save_region_files(region_files: List[Tuple[str, bytes]]) -> None:
+    """
+    Prompts the user to select a folder and saves all generated files there.
+    Overwrites existing files without asking, to avoid Streamlit rerun issues.
+    """
     target_folder = pick_folder_dialog()
     if not target_folder:
-        st.info("저장할 폴더를 선택해주세요.")
+        st.info("저장할 폴더를 선택하지 않았습니다.")
         return
-    conflicts = [filename for filename, _ in region_files if os.path.exists(os.path.join(target_folder, filename))]
-    if conflicts:
-        st.warning("다음 파일이 이미 존재합니다: " + ", ".join(conflicts))
-        if not st.checkbox("덮어쓰기", key="confirm_overwrite_all_regions"):
-            return
+
+    saved_count = 0
     try:
         for filename, data_bytes in region_files:
-            with open(os.path.join(target_folder, filename), "wb") as file:
+            full_path = os.path.join(target_folder, filename)
+            with open(full_path, "wb") as file:
                 file.write(data_bytes)
-        st.success(f"저장완료: {target_folder}")
+            saved_count += 1
+        st.success(f"총 {saved_count}개 파일을 저장했습니다: {target_folder}")
     except (OSError, IOError) as exc:
-        st.error(f"저장 실패: {exc}")
+        st.error(f"저장 중 오류가 발생했습니다: {exc}")
         LOGGER.exception("Failed to save region files")
 
 
@@ -249,10 +252,8 @@ def render_file_generation() -> None:
     with left_col:
         source_df, rename_map, yy_mm, year_value, month_value, region_mode = _render_left_panel(required_aliases)
     with right_col:
-        tabs = st.tabs(["생성결과", "미리보기", "원본 데이터"])
+        tabs = st.tabs(["결과", "미리보기", "원본 데이터"])
         if source_df is None or rename_map is None or yy_mm is None or region_mode is None:
-            with tabs[0]:
-                st.info("파일 업로드와 날짜/국내·해외 선택을 완료해주세요.")
             return
         output_df = _build_standardized_df(source_df, rename_map)
         with tabs[0]:

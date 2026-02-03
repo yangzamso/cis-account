@@ -9,8 +9,7 @@ from config import MENU_OPTIONS
 
 def setup_page() -> None:
     """Configure Streamlit page and shared styles."""
-    st.set_page_config(page_title="엑셀 병합 프로그램", layout="wide")
-    st.title("엑셀 병합 프로그램")
+    st.set_page_config(page_title="회계처리", layout="wide")
     st.markdown(
         "<style>"
         "h1 { font-size: 24px !important; } "
@@ -18,6 +17,11 @@ def setup_page() -> None:
         ".stDownloadButton button { white-space: nowrap !important; width: auto !important; "
         "margin-right: 10px; margin-bottom: 10px; } "
         ".stDownloadButton { width: auto !important; }"
+
+        "div[role='radiogroup'] label[data-checked='true'] {"
+        "   background-color: #FFF9C4 !important;"
+        "   border-radius: 5px !important;"
+        "}"
         "</style>",
         unsafe_allow_html=True,
     )

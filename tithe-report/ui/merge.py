@@ -342,11 +342,9 @@ def render_merge() -> None:
                     LOGGER.exception("Failed to compute merge views")
 
     with right_col:
-        tabs = st.tabs(["병합결과", "원본데이터"])
+        tabs = st.tabs(["결과", "원본데이터"])
         # 파일 미업로드 상태
         if raw_df is None and not folder_batch_mode:
-            with tabs[0]:
-                st.info("엑셀 파일을 업로드해주세요.")
             return
         # 파일 업로드 후 버튼 미클릭 상태
         if not proceed_merge and not folder_batch_mode:

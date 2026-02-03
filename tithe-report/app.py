@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import streamlit as st
 from typing import Callable, cast
 
 
@@ -30,7 +31,10 @@ def main() -> None:
     )
 
     setup_page()
+    title_placeholder = st.empty()
     menu = render_menu()
+    title_placeholder.title(f"회계처리 - {menu}")
+
     if menu == "취합 파일 생성":
         render_file_generation()
     elif menu == "파일 병합":

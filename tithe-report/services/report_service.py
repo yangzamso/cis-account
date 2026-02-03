@@ -169,6 +169,35 @@ def build_report_stats_lines_for_key(df: pd.DataFrame, col_map: dict, key_name: 
     return lines
 
 
+def build_report_stats_df(df: pd.DataFrame, col_map: dict, key_name: str) -> pd.DataFrame:
+    """Build stats DataFrame for a single key (십일조/회비/체육회비) for table display."""
+    dept_col = col_map.get("부서")
+    value_col = col_map.get(key_name)
+    if not dept_col or dept_col not in df.columns or not value_col or value_col not in df.columns:
+        return pd.DataFrame(columns=["부서", "비율"])
+
+    dept_values = df[dept_col].astype(str).str.strip()
+    paid_flags = []
+    for val in df[value_col]:
+        paid, _ = _parse_paid_amount(val)
+        paid_flags.append(paid)
+    paid_series = pd.Series(paid_flags, index=df.index)
+
+    data = []
+    for dept_key, label in DEPT_STATS_ORDER:
+        mask = dept_values == dept_key
+        total = int(mask.sum())
+        paid = int((paid_series & mask).sum())
+        # unpaid = total - paid
+        ratio = (paid / total * 100) if total else 0.0
+        data.append({
+            "부서": label,
+            "비율": ratio
+        })
+    
+    return pd.DataFrame(data)
+
+
 def build_region_summary(
     df: pd.DataFrame,
     col_map: dict,
