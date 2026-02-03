@@ -31,6 +31,16 @@ def _parse_yyyymm_from_name(filename: str) -> Optional[Tuple[int, int]]:
     return (year, month)
 
 
+def _safe_str(val: Any) -> str:
+    """NaN, None, 'nan' 등을 빈 문자열로 변환합니다."""
+    if pd.isna(val) or val is None:
+        return ""
+    s = str(val).strip()
+    if s.lower() in ("nan", "none", "nat"):
+        return ""
+    return s
+
+
 def _collect_annual_person_data(file_paths: List[str]) -> Tuple[Dict[str, Any], Optional[int], List[int]]:
     """
     모든 파일을 읽어 인원별(Key)로 데이터를 병합합니다.
@@ -121,12 +131,12 @@ def _collect_annual_person_data(file_paths: List[str]) -> Tuple[Dict[str, Any], 
             if month >= persons[key]["last_updated_month"]:
                 persons[key]["base_info"] = {
                     "고유번호": raw_id,
-                    "지역": str(row.get(region_col, "")).strip() if region_col else "",
-                    "팀": str(row.get(team_col, "")).strip() if team_col else "",
-                    "부서": str(row.get(dept_col, "")).strip() if dept_col else "",
+                    "지역": _safe_str(row.get(region_col, "")),
+                    "팀": _safe_str(row.get(team_col, "")),
+                    "부서": _safe_str(row.get(dept_col, "")),
                     "이름(KR)": raw_name,
-                    "이름(RU)": str(row.get(name_ru_col, "")).strip() if name_ru_col else "",
-                    "출결여부": str(row.get(attend_col, "")).strip() if attend_col else "",
+                    "이름(RU)": _safe_str(row.get(name_ru_col, "")),
+                    "출결여부": _safe_str(row.get(attend_col, "")),
                 }
                 persons[key]["last_updated_month"] = month
             

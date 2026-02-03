@@ -144,14 +144,11 @@ def _build_region_files(overseas_df: pd.DataFrame, yy_mm: str, year_value: int, 
     return region_files
 
 
-def _save_region_files(region_files: List[Tuple[str, bytes]]) -> None:
-    """
-    Prompts the user to select a folder and saves all generated files there.
-    Overwrites existing files without asking, to avoid Streamlit rerun issues.
-    """
+def save_all_files(region_files: List[Tuple[str, bytes]]) -> None:
+    """사용자가 선택한 폴더에 모든 파일을 저장합니다."""
     target_folder = pick_folder_dialog()
     if not target_folder:
-        st.info("저장할 폴더를 선택하지 않았습니다.")
+        st.info("파일을 저장할 폴더를 선택하지 않았습니다.")
         return
 
     saved_count = 0
@@ -161,10 +158,10 @@ def _save_region_files(region_files: List[Tuple[str, bytes]]) -> None:
             with open(full_path, "wb") as file:
                 file.write(data_bytes)
             saved_count += 1
-        st.success(f"총 {saved_count}개 파일을 저장했습니다: {target_folder}")
+        st.success(f"선택한 폴더에 파일 {saved_count}개를 저장했습니다: {target_folder}")
     except (OSError, IOError) as exc:
-        st.error(f"저장 중 오류가 발생했습니다: {exc}")
-        LOGGER.exception("Failed to save region files")
+        st.error(f"파일 저장 중 오류가 발생했습니다: {exc}")
+        LOGGER.exception("Failed to save files")
 
 
 def _render_overseas_download(source_df: pd.DataFrame, yy_mm: str, year_value: int, month_value: int) -> None:
@@ -173,7 +170,7 @@ def _render_overseas_download(source_df: pd.DataFrame, yy_mm: str, year_value: i
     if not region_files:
         return
     if st.button("전체 저장"):
-        _save_region_files(region_files)
+        save_all_files(region_files)
     st.divider()
     label_map = {config.code: config.label for config in REGION_CONFIGS}
     order = ["KOR", "RUS", "YAK", "CRM", "KAZ", "UZB", "UKR"]
@@ -243,7 +240,7 @@ def _render_domestic_download(output_df: pd.DataFrame, yy_mm: str) -> None:
     kor_df["미납사유"] = pd.NA
 
     kor_bytes = to_excel_bytes(kor_df, sheet_name="tithe", autofilter={"column": "지역", "value": "국내"}, hide_rows=hide_rows)
-    st.download_button("지역명 XLSX 다운로드", data=kor_bytes, file_name=f"CIS-TITHE-KOR-{yy_mm}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"kor_template_{yy_mm}")
+    st.download_button("국내 XLSX 다운로드", data=kor_bytes, file_name=f"CIS-TITHE-KOR-{yy_mm}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"kor_template_{yy_mm}")
 
 
 def render_file_generation() -> None:

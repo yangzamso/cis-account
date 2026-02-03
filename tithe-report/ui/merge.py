@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import tempfile
 import zipfile
 from datetime import date
@@ -58,8 +59,8 @@ def _render_file_upload() -> Tuple[Optional[pd.DataFrame], Optional[str], bool]:
     """통합 파일 업로드 UI - ZIP, XLSX, XLS 자동 처리."""
     st.subheader("1) 파일 업로드")
     uploaded_files = st.file_uploader(
-        "파일을 선택하세요 (ZIP, XLSX, XLS)",
-        type=["zip", "xlsx", "xls"],
+        "파일을 선택하세요 (ZIP, XLSX, XLS, TXT)",
+        type=["zip", "xlsx", "xls", "txt"],
         accept_multiple_files=True,
     )
 
@@ -69,10 +70,10 @@ def _render_file_upload() -> Tuple[Optional[pd.DataFrame], Optional[str], bool]:
 
     # ZIP 파일이 있는지 확인
     zip_files = [f for f in uploaded_files if f.name.lower().endswith(".zip")]
-    excel_files = [f for f in uploaded_files if f.name.lower().endswith((".xlsx", ".xls"))]
+    data_files = [f for f in uploaded_files if f.name.lower().endswith((".xlsx", ".xls", ".txt"))]
 
-    if zip_files and excel_files:
-        st.warning("ZIP 파일과 엑셀 파일을 동시에 업로드할 수 없습니다. 하나만 선택해주세요.")
+    if zip_files and data_files:
+        st.warning("ZIP 파일과 데이터 파일(엑셀/텍스트)을 동시에 업로드할 수 없습니다. 하나만 선택해주세요.")
         return None, None, False
 
     if zip_files:
@@ -82,8 +83,8 @@ def _render_file_upload() -> Tuple[Optional[pd.DataFrame], Optional[str], bool]:
             return None, None, False
         return _handle_zip_upload(zip_files[0])
     else:
-        # 엑셀 파일 처리 (파일 모드)
-        return _handle_excel_upload(excel_files)
+        # 엑셀/텍스트 파일 처리 (파일 모드)
+        return _handle_excel_upload(data_files)
 
 
 def _handle_zip_upload(zip_file) -> Tuple[Optional[pd.DataFrame], Optional[str], bool]:
@@ -92,28 +93,42 @@ def _handle_zip_upload(zip_file) -> Tuple[Optional[pd.DataFrame], Optional[str],
         temp_dir = _extract_zip_to_temp(zip_file)
         st.session_state["merge_temp_dir"] = temp_dir
 
-        # 엑셀 파일 직접 검색
-        excel_files = list_excel_files(temp_dir)
-        if excel_files:
-            frames = build_merge_frames_from_paths(excel_files)
+        # 1. YYYY.MM 하위 폴더 검색 (재귀)
+        # 모든 깊이의 YYYY.MM 폴더를 찾아서 배치 모드로 동작할지 결정
+        all_subfolders = []
+        subfolder_pattern = re.compile(r"^(\d{4})\.(\d{2})$")
+        for root, dirs, files in os.walk(temp_dir):
+            for d in dirs:
+                if subfolder_pattern.match(d):
+                    all_subfolders.append(os.path.join(root, d))
+                    
+        if all_subfolders:
+            st.session_state["merge_subfolders"] = sorted(all_subfolders)
+            st.session_state["merge_subfolder_mode"] = True
+            st.session_state["merge_source_folder"] = temp_dir
+            st.success(f"ZIP 파일에서 {len(all_subfolders)}개의 월별 폴더를 찾았습니다 (하위 폴더 포함).")
+            return None, temp_dir, True
+
+        # 2. YYYY.MM 폴더가 없으면 모든 엑셀/TXT 파일 직접 검색 (재귀)
+        data_files = []
+        for root, dirs, files in os.walk(temp_dir):
+            for file in files:
+                if file.lower().endswith((".xlsx", ".xls", ".txt")) and not file.startswith("~$"):
+                    data_files.append(os.path.join(root, file))
+                    
+        if data_files:
+            # 파일들은 이름순 정렬하여 병합 순서 보장
+            data_files.sort()
+            frames = build_merge_frames_from_paths(data_files)
             if frames:
                 raw_df = pd.concat(frames, ignore_index=True, copy=False)
                 raw_df = optimize_merge_df(raw_df)
                 st.session_state["folder_merge_raw_df"] = raw_df
                 st.session_state["merge_subfolder_mode"] = False
-                st.success(f"ZIP 파일에서 {len(excel_files)}개의 엑셀 파일을 불러왔습니다.")
+                st.success(f"ZIP 파일에서 {len(data_files)}개의 데이터 파일을 불러왔습니다 (하위 폴더 포함).")
                 return raw_df, temp_dir, False
 
-        # YYYY.MM 하위 폴더 검색
-        subfolders = list_yyyymm_subfolders(temp_dir)
-        if subfolders:
-            st.session_state["merge_subfolders"] = sorted(subfolders)
-            st.session_state["merge_subfolder_mode"] = True
-            st.session_state["merge_source_folder"] = temp_dir
-            st.success(f"ZIP 파일에서 {len(subfolders)}개의 월별 폴더를 찾았습니다.")
-            return None, temp_dir, True
-
-        st.error("ZIP 파일에 엑셀 파일이 없고, YYYY.MM 형식의 하위 폴더도 없습니다.")
+        st.error("ZIP 파일에 엑셀/텍스트 파일이 없고, YYYY.MM 형식의 하위 폴더도 없습니다.")
         return None, None, False
 
     except zipfile.BadZipFile:
@@ -125,14 +140,14 @@ def _handle_zip_upload(zip_file) -> Tuple[Optional[pd.DataFrame], Optional[str],
         return None, None, False
 
 
-def _handle_excel_upload(excel_files: List) -> Tuple[Optional[pd.DataFrame], Optional[str], bool]:
-    """엑셀 파일 업로드 처리."""
-    file_items = [(file.name, file.getvalue()) for file in excel_files]
+def _handle_excel_upload(files: List) -> Tuple[Optional[pd.DataFrame], Optional[str], bool]:
+    """엑셀/텍스트 파일 업로드 처리."""
+    file_items = [(file.name, file.getvalue()) for file in files]
     frames = build_merge_frames(file_items)
     if not frames:
         return None, None, False
     merged = pd.concat(frames, ignore_index=True, copy=False)
-    st.success(f"{len(excel_files)}개의 엑셀 파일을 불러왔습니다.")
+    st.success(f"{len(files)}개의 파일을 불러왔습니다.")
     return optimize_merge_df(merged), None, False
 
 

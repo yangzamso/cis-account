@@ -206,10 +206,55 @@ def _apply_filter(ws: Any, df: pd.DataFrame, autofilter: Dict[str, Any]) -> None
     max_row = ws.max_row
     max_col = ws.max_column
     ws.auto_filter.ref = f"A1:{get_column_letter(max_col)}{max_row}"
-    filter_col = df.columns.get_loc(autofilter["column"])
-    filter_value = autofilter.get("value")
-    values = filter_value if isinstance(filter_value, list) else [filter_value]
-    ws.auto_filter.add_filter_column(filter_col, values)
+    
+    # "all": True 이거나 특정 컬럼 지정이 없으면 필터 화살표만 생성
+    if autofilter.get("all"):
+        return
+        
+    if "column" in autofilter and "value" in autofilter:
+        col_name = autofilter["column"]
+        if col_name in df.columns:
+            filter_col = df.columns.get_loc(col_name)
+            filter_value = autofilter.get("value")
+            values = filter_value if isinstance(filter_value, list) else [filter_value]
+            # openpyxl 0-based index for add_filter_column? No, it usually takes 0-based col id relative to range
+            ws.auto_filter.add_filter_column(filter_col, values)
+
+
+def _apply_invalid_uid_highlight(ws: Any, df: pd.DataFrame) -> None:
+    """고유번호 형식이 00000000-00000 이 아닌 행을 빨강색으로 강조."""
+    # 고유번호 컬럼 찾기
+    uid_col_idx = -1
+    for idx, col in enumerate(df.columns):
+        if "고유번호" in str(col):
+            uid_col_idx = idx
+            break
+            
+    if uid_col_idx == -1:
+        return
+
+    # 스타일 정의 (진한 빨강 텍스트, 연한 빨강 배경)
+    red_font = Font(color="9C0006", bold=True, size=10)
+    pink_fill = PatternFill(fill_type="solid", fgColor="FFC7CE")
+    
+    pattern = re.compile(r"^\d{8}-\d{5}$")
+    
+    # 데이터 행 순회 (헤더 제외, 2행부터)
+    # df.iloc[row_idx]에 해당하는 엑셀 행은 row_idx + 2
+    for i in range(len(df)):
+        val = str(df.iloc[i, uid_col_idx]).strip()
+        # 빈 값은 패스? 아니면 빈 값도 오류로 칠 것인가? -> 규칙4: "고유번호가 ... 아닌 경우"
+        # 빈 값도 포함.
+        is_valid = bool(pattern.match(val))
+        
+        if not is_valid:
+            # 해당 행 전체 스타일 적용
+            excel_row = i + 2
+            # ws.iter_rows를 쓰기엔 비효율적일 수 있으므로 직접 접근
+            for col in range(1, ws.max_column + 1):
+                cell = ws.cell(row=excel_row, column=col)
+                cell.font = red_font
+                cell.fill = pink_fill
 
 
 def _apply_hide_rows(ws: Any, hide_rows: pd.Series) -> None:
@@ -223,6 +268,7 @@ def apply_sheet_style(
     df: pd.DataFrame,
     autofilter: Optional[Dict[str, Any]] = None,
     hide_rows: Optional[pd.Series] = None,
+    highlight_invalid_uid: bool = False,
 ) -> None:
     """Apply shared Excel styling to a worksheet."""
     font = Font(size=10)
@@ -237,6 +283,8 @@ def apply_sheet_style(
         _apply_filter(ws, df, autofilter)
     if hide_rows is not None:
         _apply_hide_rows(ws, hide_rows)
+    if highlight_invalid_uid:
+        _apply_invalid_uid_highlight(ws, df)
 
 
 def to_excel_bytes(
@@ -244,13 +292,14 @@ def to_excel_bytes(
     sheet_name: str = "Sheet1",
     autofilter: Optional[Dict[str, Any]] = None,
     hide_rows: Optional[pd.Series] = None,
+    highlight_invalid_uid: bool = False,
 ) -> bytes:
     """Serialize dataframe to styled Excel bytes."""
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         df.to_excel(writer, index=False, sheet_name=sheet_name)
         ws = writer.book[sheet_name]
-        apply_sheet_style(ws, df, autofilter=autofilter, hide_rows=hide_rows)
+        apply_sheet_style(ws, df, autofilter=autofilter, hide_rows=hide_rows, highlight_invalid_uid=highlight_invalid_uid)
     return output.getvalue()
 
 

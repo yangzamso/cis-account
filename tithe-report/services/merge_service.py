@@ -20,6 +20,7 @@ from utils.excel_utils import (
     write_excel_sheets,
 )
 from services.translation_service import translate_memos
+from utils.text_parser import parse_txt_to_df
 
 
 def first_non_null(series: pd.Series) -> Any:
@@ -134,7 +135,14 @@ def build_merge_frames(file_items: Sequence[Tuple[str, bytes]]) -> List[pd.DataF
     frames: List[pd.DataFrame] = []
     for file_name, file_bytes in file_items:
         try:
-            df = read_excel_smart_bytes(file_bytes)
+            if file_name.lower().endswith(".txt"):
+                df = parse_txt_to_df(file_bytes)
+                if df.empty:
+                    st.error(f"{file_name}: 고유번호가 없는 파일입니다. \n고유번호를 추가하여 다시 병합해 주세요.")
+                    return []
+            else:
+                df = read_excel_smart_bytes(file_bytes)
+            
             df = make_unique_columns(df)
             df = _normalize_merge_df(df)
         except (ValueError, TypeError, KeyError, OSError, IOError) as exc:
@@ -156,11 +164,19 @@ def build_merge_frames_from_paths(file_paths: Sequence[str]) -> List[pd.DataFram
     frames: List[pd.DataFrame] = []
     for file_path in file_paths:
         try:
-            file_size = os.path.getsize(file_path)
-            if file_size >= LARGE_FILE_THRESHOLD_BYTES:
-                df = _read_excel_maybe_chunked(file_path)
+            if file_path.lower().endswith(".txt"):
+                with open(file_path, "rb") as f:
+                    df = parse_txt_to_df(f.read())
+                if df.empty:
+                    st.error(f"{os.path.basename(file_path)}: 고유번호가 없는 파일입니다. \n고유번호를 추가하여 다시 병합해 주세요.")
+                    return []
             else:
-                df = read_excel_smart_path(file_path)
+                file_size = os.path.getsize(file_path)
+                if file_size >= LARGE_FILE_THRESHOLD_BYTES:
+                    df = _read_excel_maybe_chunked(file_path)
+                else:
+                    df = read_excel_smart_path(file_path)
+            
             df = make_unique_columns(df)
             df = _normalize_merge_df(df)
         except (ValueError, TypeError, KeyError, OSError, IOError) as exc:
@@ -181,6 +197,22 @@ def optimize_merge_df(df: pd.DataFrame) -> pd.DataFrame:
     if dtype_map:
         df = df.astype(dtype_map, copy=False)
     return df
+
+
+def merge_raw_data_by_id(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    고유번호를 기준으로 데이터를 병합합니다 (Aggregate).
+    중복된 고유번호가 있을 경우, 각 컬럼별로 비어있지 않은(first_non_null) 값을 우선하여 하나로 합칩니다.
+    """
+    if df.empty or "고유번호" not in df.columns:
+        return df
+        
+    # 고유번호 기준 그룹핑 및 병합 (유효값 우선)
+    # dropna=False: 고유번호가 없는 행들도 그룹핑(NaN 그룹)에 포함되나? 
+    # 보통 고유번호 없는 행은 별도로 취급하거나 해야 하지만, 여기서는 그대로 둠.
+    grouped = df.groupby("고유번호", dropna=False)
+    merged_df = grouped.aggregate(first_non_null).reset_index()
+    return merged_df
 
 
 def compute_merge_views(raw_df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
@@ -205,8 +237,9 @@ def compute_merge_views(raw_df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFram
         ],
     )
 
-    grouped = raw_df.groupby("고유번호", dropna=False)
-    merged_df = grouped.aggregate(first_non_null).reset_index()
+    # 위의 분리된 로직 사용 (이제 last_non_null 사용됨)
+    merged_df = merge_raw_data_by_id(raw_df)
+    
     merged_view = build_view(
         merged_df,
         [
@@ -269,7 +302,9 @@ def init_progress_rows(subfolders: Sequence[str]) -> Dict[str, Tuple[Any, Any]]:
     with st.container():
         for folder_name in sorted(subfolders):
             name_col, bar_col, status_col = st.columns([2, 4, 2])
-            name_col.write(folder_name)
+            # 폴더명만 화면에 표시
+            display_name = os.path.basename(folder_name)
+            name_col.write(display_name)
             bar = bar_col.progress(0)
             status = status_col.empty()
             status.write("대기")
@@ -278,21 +313,31 @@ def init_progress_rows(subfolders: Sequence[str]) -> Dict[str, Tuple[Any, Any]]:
 
 
 def process_subfolder_merge(
-    source_folder: str,
-    folder_name: str,
+    full_folder_path: str,
     output_path: str,
     overwrite_checked: bool,
     translate_model: Optional[str],
     translate_api_key: Optional[str],
 ) -> Tuple[str, Optional[pd.DataFrame], Optional[pd.DataFrame], List[str]]:
     """Process a single subfolder merge and return status."""
+    folder_name = os.path.basename(full_folder_path)
+    
     if os.path.exists(output_path) and not overwrite_checked:
         return "skip", None, None, [f"[{folder_name}] 이미 파일이 존재합니다."]
 
-    folder_path = os.path.join(source_folder, folder_name)
-    files = list_excel_files(folder_path)
+    files = list_excel_files(full_folder_path)
+    # list_excel_files가 비재귀적이라면 여기서도 os.walk를 써야 함.
+    # 하지만 앞서 ui/annual_stats.py에서만 고쳤으므로 여기서도 고쳐야 함.
+    # 안전을 위해 여기서 os.walk 로직 사용
+    files = []
+    for root, dirs, fnames in os.walk(full_folder_path):
+        for f in fnames:
+            if f.lower().endswith((".xlsx", ".xls", ".txt")) and not f.startswith("~$"):
+                files.append(os.path.join(root, f))
+    files.sort()
+
     if not files:
-        return "skip", None, None, [f"[{folder_name}] 엑셀 파일 없음"]
+        return "skip", None, None, [f"[{folder_name}] 엑셀/TXT 파일 없음"]
 
     file_items: List[Tuple[str, bytes]] = []
     errors: List[str] = []
@@ -343,22 +388,30 @@ def run_subfolder_merge(
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {}
-        for folder_name in sorted(subfolders):
-            output_name = MERGE_OUTPUT_FILENAME_PATTERN.format(yy_mm=folder_name)
+        for folder_path in sorted(subfolders):
+            folder_name_only = os.path.basename(folder_path)
+            # 파일명 패턴에 폴더 이름 적용
+            output_name = f"병합결과_{folder_name_only}.xlsx"
+            if "MERGE_OUTPUT_FILENAME_PATTERN" in globals():
+                try:
+                    output_name = MERGE_OUTPUT_FILENAME_PATTERN.format(yy_mm=folder_name_only)
+                except Exception:
+                    # 포맷이 안 맞으면 기본값
+                    pass
+            
             output_path = os.path.join(folder_output_dir, output_name)
             futures[executor.submit(
                 process_subfolder_merge,
-                source_folder,
-                folder_name,
+                folder_path,
                 output_path,
                 overwrite_checked,
                 translate_model,
                 translate_api_key,
-            )] = folder_name
+            )] = folder_path
 
         for future in as_completed(futures):
-            folder_name = futures[future]
-            bar, status = progress_rows.get(folder_name, (None, None))
+            folder_path = futures[future]
+            bar, status = progress_rows.get(folder_path, (None, None))
             if status is not None:
                 status.write("처리중")
             try:
