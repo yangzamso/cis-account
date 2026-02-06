@@ -100,6 +100,7 @@ def _collect_annual_person_data(file_paths: List[str]) -> Tuple[Dict[str, Any], 
         id_col = find_col_by_keyword(cols, "고유번호")
         region_col = find_col_by_keyword(cols, "지역")
         team_col = find_col_by_keyword(cols, "팀")
+        area_col = find_col_by_keyword(cols, "구역")
         dept_col = find_col_by_keyword(cols, "부서")
         name_kr_col = find_col_by_keyword(cols, "이름(KR)") or find_col_by_keyword(cols, "이름")
         name_ru_col = find_col_by_keyword(cols, "이름(RU)") or find_col_by_keyword(cols, "이름(ru)")
@@ -133,6 +134,7 @@ def _collect_annual_person_data(file_paths: List[str]) -> Tuple[Dict[str, Any], 
                     "고유번호": raw_id,
                     "지역": _safe_str(row.get(region_col, "")),
                     "팀": _safe_str(row.get(team_col, "")),
+                    "구역": _safe_str(row.get(area_col, "")),
                     "부서": _safe_str(row.get(dept_col, "")),
                     "이름(KR)": raw_name,
                     "이름(RU)": _safe_str(row.get(name_ru_col, "")),
@@ -267,6 +269,7 @@ def build_annual_detail_table(file_paths: List[str], target_year: int) -> pd.Dat
         row = {
             "고유번호": base.get("고유번호", ""),
             "지역": base.get("지역", ""),
+            "구역": base.get("구역", ""),
             "팀": base.get("팀", ""),
             "부서": base.get("부서", ""),
             "이름(KR)": base.get("이름(KR)", ""),
@@ -282,7 +285,7 @@ def build_annual_detail_table(file_paths: List[str], target_year: int) -> pd.Dat
         rows.append(row)
 
     columns = [
-        "고유번호", "지역", "팀", "부서", "이름(KR)", "이름(RU)", "출결여부"
+        "고유번호", "지역", "팀", "구역", "부서", "이름(KR)", "이름(RU)", "출결여부"
     ]
     for m in months:
         columns.append(f"{m}월 십일조")

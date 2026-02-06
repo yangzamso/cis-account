@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import zipfile
 from datetime import date
 from io import BytesIO
 from typing import Dict, List, Optional, Tuple
@@ -144,24 +145,13 @@ def _build_region_files(overseas_df: pd.DataFrame, yy_mm: str, year_value: int, 
     return region_files
 
 
-def save_all_files(region_files: List[Tuple[str, bytes]]) -> None:
-    """사용자가 선택한 폴더에 모든 파일을 저장합니다."""
-    target_folder = pick_folder_dialog()
-    if not target_folder:
-        st.info("파일을 저장할 폴더를 선택하지 않았습니다.")
-        return
-
-    saved_count = 0
-    try:
-        for filename, data_bytes in region_files:
-            full_path = os.path.join(target_folder, filename)
-            with open(full_path, "wb") as file:
-                file.write(data_bytes)
-            saved_count += 1
-        st.success(f"선택한 폴더에 파일 {saved_count}개를 저장했습니다: {target_folder}")
-    except (OSError, IOError) as exc:
-        st.error(f"파일 저장 중 오류가 발생했습니다: {exc}")
-        LOGGER.exception("Failed to save files")
+def _to_zip_bytes(files: List[Tuple[str, bytes]]) -> bytes:
+    """여러 파일을 하나의 ZIP 파일로 묶어 바이트로 반환합니다."""
+    zip_buffer = BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+        for filename, data in files:
+            zip_file.writestr(filename, data)
+    return zip_buffer.getvalue()
 
 
 def _render_overseas_download(source_df: pd.DataFrame, yy_mm: str, year_value: int, month_value: int) -> None:
@@ -169,8 +159,18 @@ def _render_overseas_download(source_df: pd.DataFrame, yy_mm: str, year_value: i
     region_files = _build_region_files(overseas_df, yy_mm, year_value, month_value)
     if not region_files:
         return
-    if st.button("전체 저장"):
-        save_all_files(region_files)
+
+    # 전체 파일을 ZIP으로 묶어서 다운로드 버튼 생성
+    zip_bytes = _to_zip_bytes(region_files)
+    st.download_button(
+        label="📂 전체 저장 (ZIP 다운로드)",
+        data=zip_bytes,
+        file_name=f"CIS-TITHE-ALL-{yy_mm}.zip",
+        mime="application/zip",
+        use_container_width=True,
+        key=f"all_download_{yy_mm}"
+    )
+
     st.divider()
     label_map = {config.code: config.label for config in REGION_CONFIGS}
     order = ["KOR", "RUS", "YAK", "CRM", "KAZ", "UZB", "UKR"]
