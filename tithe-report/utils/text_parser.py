@@ -24,9 +24,9 @@ def _clean_amount_str(val: str) -> float:
     if not val:
         return 0.0
     
-    # 1. 공백 제거 (천단위 구분자 등)
-    val = val.replace(" ", "").replace("\xa0", "")
-    
+    # 1. 숫자/기호 외 문자 제거 (인코딩 깨짐, NULL 포함 대비)
+    val = re.sub(r"[^0-9,.\-]", "", val)
+
     # 2. 콤마를 점으로 변경 (소수점 처리)
     val = val.replace(",", ".")
     
@@ -54,22 +54,43 @@ def _parse_line_logic(line: str) -> Tuple[Optional[str], Optional[str], Optional
         return None, None, None
 
     # 전략 1: '/' 구분자 사용
-    # 예: 1/1001/Ivan/5000
+    # 예: 1/1001/Ivan/5000 or 00300725-00026 / Name / 2000
     if "/" in line:
         parts = [p.strip() for p in line.split("/")]
-        # 보통 순번/고유번호/이름/금액 -> 4개
-        if len(parts) >= 4:
-            # 보수적으로 2번째를 고유번호, 마지막을 금액으로 간주
-            # 단, 고유번호가 숫자인지 확인 (하이픈 포함 가능)
-            uid_cand = parts[1]
-            amt_cand = parts[-1]
-            # 고유번호가 숫자 또는 하이픈 포함된 형태인지 간단 확인 (상세 검증은 별도)
-            if any(c.isdigit() for c in uid_cand):
-                return uid_cand, parts[2], _clean_amount_str(amt_cand)
-        elif len(parts) == 3:
-             # 고유번호/이름/금액 일 수도 있음
-             if any(c.isdigit() for c in parts[0]):
-                 return parts[0], parts[1], _clean_amount_str(parts[-2])
+        uid = None
+        name = None
+        amount = None
+
+        # UID 위치 판별 (보통 0번째, 경우에 따라 1번째)
+        if len(parts) >= 1 and _is_valid_uid_format(parts[0]):
+            uid = parts[0]
+            name = parts[1] if len(parts) > 1 else None
+            amount_candidates = parts[2:]
+        elif len(parts) >= 2 and _is_valid_uid_format(parts[1]):
+            uid = parts[1]
+            name = parts[2] if len(parts) > 2 else None
+            amount_candidates = parts[3:]
+        else:
+            # UID 형식이 아니더라도 숫자 포함이면 임시로 사용
+            if len(parts) >= 1 and any(c.isdigit() for c in parts[0]):
+                uid = parts[0]
+                name = parts[1] if len(parts) > 1 else None
+                amount_candidates = parts[2:]
+            elif len(parts) >= 2 and any(c.isdigit() for c in parts[1]):
+                uid = parts[1]
+                name = parts[2] if len(parts) > 2 else None
+                amount_candidates = parts[3:]
+            else:
+                amount_candidates = []
+
+        # 뒤에서부터 숫자가 포함된 토큰을 금액으로 사용
+        for token in reversed(amount_candidates):
+            if any(ch.isdigit() for ch in token):
+                amount = _clean_amount_str(token)
+                break
+
+        if uid is not None:
+            return uid, name, amount if amount is not None else 0.0
 
     # 전략 2: 러시아어(문자)와 숫자 경계 기반 Regex
     # 이름과 금액이 붙어있거나 공백이 불규칙한 경우
@@ -99,11 +120,18 @@ def _parse_line_logic(line: str) -> Tuple[Optional[str], Optional[str], Optional
 
 def parse_txt_to_df(file_bytes: bytes) -> pd.DataFrame:
     """TXT 파일 바이트를 읽어 DataFrame으로 반환."""
+    # 인코딩 감지/대응 (UTF-8/UTF-16/CP1251 등)
     try:
         text = file_bytes.decode("utf-8")
     except UnicodeDecodeError:
-        # UTF-8 실패 시 EUC-KR 등 시도, 여기서는 일단 무시하고 replace
-        text = file_bytes.decode("utf-8", errors="replace")
+        try:
+            text = file_bytes.decode("utf-16")
+        except UnicodeDecodeError:
+            try:
+                text = file_bytes.decode("cp1251")
+            except UnicodeDecodeError:
+                # 최후: 손상된 문자 replace
+                text = file_bytes.decode("utf-8", errors="replace")
 
     rows = []
     lines = text.splitlines()
