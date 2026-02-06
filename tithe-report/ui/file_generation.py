@@ -165,7 +165,7 @@ def _render_overseas_download(source_df: pd.DataFrame, yy_mm: str, year_value: i
     st.download_button(
         label="📂 전체 저장 (ZIP 다운로드)",
         data=zip_bytes,
-        file_name=f"CIS-TITHE-ALL-{yy_mm}.zip",
+        file_name=f"CIS-TITHE-ALL-{year_value}.{month_value:02d}.zip",
         mime="application/zip",
         use_container_width=True,
         key=f"all_download_{yy_mm}"
