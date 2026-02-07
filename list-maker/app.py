@@ -16,7 +16,7 @@ st.markdown("""
     h1 { font-size: 20px !important; }
     h2, h3, .stHeader { font-size: 18px !important; }
     
-    /* 태블릿 환경: 3열 -> 2열 통일 (992px 이하) */
+    /* 태블릿 환경: 4열 -> 2열 통일 (992px 이하) */
     @media (max-width: 992px) and (min-width: 601px) {
         /* 구역 리스트(Streamlit Columns) 보정 */
         div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
@@ -42,18 +42,22 @@ st.markdown("""
         }
     }
 
-    /* 기본 설정: PC 환경 (3열) */
+    /* 기본 설정: PC 환경 (4열) */
     div[data-testid="stRadio"] > div {
         display: grid;
-        grid-template-columns: repeat(3, 1fr);
+        grid-template-columns: repeat(4, 1fr);
         gap: 10px;
         width: 100%;
     }
 </style>
 """, unsafe_allow_html=True)
 
-def generate_roster(df, selected_category, selected_zones, header_text):
-    """필터링된 데이터로 명단 텍스트 생성"""
+def generate_roster(df, selected_category, selected_zones, header_text, target_type="all"):
+    """필터링된 데이터로 명단 텍스트 생성
+    
+    Args:
+        target_type: "all" (모든 구역원) 또는 "cis" (사명자)
+    """
     output = []
     
     # 1. 사용자 작성 머리글
@@ -77,6 +81,39 @@ def generate_roster(df, selected_category, selected_zones, header_text):
         combined_df = pd.concat(all_data, ignore_index=True)
     else:
         return "\n".join(output)
+    
+    # 대상 선택에 따른 필터링
+    if target_type == "cis":
+        # "CIS" 열이 존재하는지 확인
+        cis_col = None
+        for col in combined_df.columns:
+            if "CIS" in str(col).upper():
+                cis_col = col
+                break
+        
+        if cis_col:
+            # CIS 열에서 빈 셀이 아닌 행만 필터링
+            combined_df = combined_df[combined_df[cis_col].notna() & (combined_df[cis_col] != "")]
+        else:
+            # CIS 열이 없으면 빈 결과 반환
+            output.append("※ 'CIS' 열을 찾을 수 없습니다.")
+            return "\n".join(output)
+    
+    elif target_type == "admin":
+        # "행정" 열이 존재하는지 확인
+        admin_col = None
+        for col in combined_df.columns:
+            if "행정" in str(col):
+                admin_col = col
+                break
+        
+        if admin_col:
+            # 행정 열에서 빈 셀이 아닌 행만 필터링
+            combined_df = combined_df[combined_df[admin_col].notna() & (combined_df[admin_col] != "")]
+        else:
+            # 행정 열이 없으면 빈 결과 반환
+            output.append("※ '행정' 열을 찾을 수 없습니다.")
+            return "\n".join(output)
     
     # 선택된 구역들만 필터링하고 오름차순 정렬
     filtered_zones = [z for z in selected_zones if z in combined_df['구역'].unique()]
@@ -150,8 +187,8 @@ def main():
     if 'generated_roster' not in st.session_state:
         st.session_state.generated_roster = ""
 
-    # 레이아웃 분할
-    left_col, right_col = st.columns([1, 2])
+    # 레이아웃 분할 (1:1 비율)
+    left_col, right_col = st.columns([1, 1])
 
     with left_col:
         st.header("1. 파일 업로드")
@@ -176,7 +213,6 @@ def main():
                     st.error("필수 열이 부족합니다. (팀, 구역, 출결, 이름 등)")
                     return
 
-                st.success("파일 로드 완료")
 
                 # 2. 팀 선택 (카테고리)
                 st.header("2. 팀 선택")
@@ -214,9 +250,15 @@ def main():
                     return
 
                 # 3. 구역 선택
-                st.header("3. 구역 리스트")
+                st.header("3. 구역 선택")
                 # 구역 데이터를 문자열로 변환 후 정렬 (타입 불일치 오류 방지)
                 available_zones = sorted([str(z) for z in filtered_df['구역'].unique()])
+                
+                # 팀 선택 시 자동으로 모든 구역 선택
+                if 'auto_select_zones' not in st.session_state or st.session_state.get('previous_category') != selected_cat:
+                    for zone in available_zones:
+                        st.session_state[f"zone_{zone}"] = True
+                    st.session_state.auto_select_zones = True
                 
                 # 전체 선택/해제 버튼 (2개 나란히 배치)
                 btn_col1, btn_col2 = st.columns(2)
@@ -231,28 +273,44 @@ def main():
                             st.session_state[f"zone_{zone}"] = False
                         st.rerun()
                 
-                # 구역 리스트를 3열로 배치 (CSS로 태블릿 2열 보정)
+                # 구역 리스트를 4열로 배치 (CSS로 태블릿 2열, 모바일 1열 보정)
                 selected_zones = []
-                zone_cols = st.columns(3)
+                zone_cols = st.columns(4)
                 for i, zone in enumerate(available_zones):
-                    with zone_cols[i % 3]:
+                    with zone_cols[i % 4]:
                         if st.checkbox(zone, key=f"zone_{zone}"):
                             selected_zones.append(zone)
 
-                st.divider()
-                if st.button("다음 단계로 ➡️", use_container_width=True):
-                    if not selected_zones:
-                        st.error("하나 이상의 구역을 선택해주세요.")
+                # 구역이 선택되면 자동으로 세션에 저장
+                if selected_zones:
+                    st.session_state.selected_zones = selected_zones
+                
+                # 4. 대상 선택 (구역이 하나라도 선택되면 표시)
+                if selected_zones:
+                    st.header("4. 대상 선택")
+                    target_type = st.radio(
+                        "대상 선택",
+                        options=["모든 구역원", "행정 직책", "CIS 직책"],
+                        index=0,
+                        key="target_type_radio",
+                        label_visibility="collapsed"
+                    )
+                    
+                    # 대상 선택을 세션에 자동 저장
+                    if target_type == "CIS 직책":
+                        st.session_state.target_type = "cis"
+                    elif target_type == "행정 직책":
+                        st.session_state.target_type = "admin"
                     else:
-                        st.session_state.current_step = 2
-                        st.rerun()
+                        st.session_state.target_type = "all"
 
             except Exception as e:
                 st.error(f"오류 발생: {e}")
 
     with right_col:
-        if st.session_state.current_step >= 2:
-            st.header("4. 머리글 및 명단 생성")
+        # 구역이 선택되면 명단 생성 화면 표시
+        if uploaded_file and 'selected_zones' in st.session_state and st.session_state.selected_zones:
+            st.header("5. 머리글 및 명단 생성")
             
             header_text = st.text_area(
                 "머리글 입력",
@@ -261,13 +319,21 @@ def main():
             )
             
             if st.button("🚀 명단 생성", use_container_width=True):
-                roster = generate_roster(df, selected_cat, selected_zones, header_text)
+                # 세션에 저장된 구역과 대상 타입 사용
+                saved_zones = st.session_state.get('selected_zones', selected_zones)
+                saved_target = st.session_state.get('target_type', 'all')
+                roster = generate_roster(df, selected_cat, saved_zones, header_text, saved_target)
                 st.session_state.generated_roster = roster
 
             if st.session_state.generated_roster:
                 st.subheader("결과 확인")
-                st.info("우측 상단의 버튼으로 전체 복사가 가능합니다.")
-                st.code(st.session_state.generated_roster, language="text")
+                st.info("💡 **아래의 텍스트를 직접 수정 할 수 있습니다.**  \n수정 완료 후 전체 선택(Ctrl+A) → 복사(Ctrl+C)하여 사용하세요.")
+                st.text_area(
+                    "생성된 명단",
+                    value=st.session_state.generated_roster,
+                    height=500,
+                    label_visibility="collapsed"
+                )
                 
                 if st.button("⬅️ 처음부터 다시 설정"):
                     st.session_state.current_step = 1
