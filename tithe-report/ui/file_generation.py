@@ -129,8 +129,17 @@ def _build_region_files(overseas_df: pd.DataFrame, yy_mm: str, year_value: int, 
         matched_values = sorted(series[mask].dropna().unique().tolist())
         if not matched_values:
             continue
+
+        # KOR(국내) 파일인 경우에만 추가 컬럼 적용
+        target_df = overseas_df
+        if config.code == "KOR":
+            target_df = overseas_df.copy()
+            target_df["회비"] = pd.NA
+            target_df["체육회비"] = pd.NA
+            target_df["미납사유"] = pd.NA
+
         file_bytes = to_excel_bytes(
-            overseas_df,
+            target_df,
             sheet_name="tithe",
             autofilter={"column": filter_col, "value": matched_values},
             hide_rows=~mask,
