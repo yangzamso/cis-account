@@ -247,7 +247,7 @@ def _render_generation_mode(uploaded_files: List[object]) -> None:
     # 개별 연간 통계 미리보기
     if not detail_df.empty:
         st.subheader(f"{year_value}년 개별 연간 통계")
-        base_cols = [c for c in ["고유번호", "지역", "팀", "구역", "부서", "이름(KR)", "이름(RU)", "출결여부"] if c in detail_df.columns]
+        base_cols = [c for c in ["고유번호", "지역", "팀", "구역", "부서", "이름(KR)", "이름(RU)", "출결여부", "총납부율", "6개월 납부율"] if c in detail_df.columns]
         tithe_cols = [f"{m}월 십일조" for m in range(1, 13) if f"{m}월 십일조" in detail_df.columns]
         st.dataframe(detail_df[base_cols + tithe_cols], use_container_width=True, hide_index=True)
 
