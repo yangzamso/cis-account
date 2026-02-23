@@ -221,13 +221,13 @@ def _render_domestic_text(standardized_df: pd.DataFrame) -> None:
         col_a, col_b, col_c = st.columns(3)
         with col_a:
             st.subheader("청장년부")
-            st.text_area("", value=adult_text, height=240, key="domestic_adult")
+            st.code(adult_text, language=None)
         with col_b:
             st.subheader("부녀부")
-            st.text_area("", value=women_text, height=240, key="domestic_women")
+            st.code(women_text, language=None)
         with col_c:
             st.subheader("청년부")
-            st.text_area("", value=youth_text, height=240, key="domestic_youth")
+            st.code(youth_text, language=None)
 
 
 def _render_domestic_download(output_df: pd.DataFrame, yy_mm: str) -> None:
