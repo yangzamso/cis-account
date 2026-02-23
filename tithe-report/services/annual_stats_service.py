@@ -266,6 +266,19 @@ def build_annual_detail_table(file_paths: List[str], target_year: int) -> pd.Dat
         base = data["base_info"]
         monthly = data['monthly_data']
         
+        months_with_data = [m for m in months if m in monthly]
+        total_paid = sum(1 for m in months_with_data if monthly[m].get("is_paid", False))
+        total_rate = round(total_paid / len(months_with_data) * 100, 1) if months_with_data else 0.0
+
+        if months_with_data:
+            last_month = max(months_with_data)
+            start_month = max(1, last_month - 5)
+            window = [m for m in range(start_month, last_month + 1) if m in monthly]
+            window_paid = sum(1 for m in window if monthly[m].get("is_paid", False))
+            six_rate = round(window_paid / len(window) * 100, 1) if window else 0.0
+        else:
+            six_rate = 0.0
+
         row = {
             "고유번호": base.get("고유번호", ""),
             "지역": base.get("지역", ""),
@@ -275,17 +288,19 @@ def build_annual_detail_table(file_paths: List[str], target_year: int) -> pd.Dat
             "이름(KR)": base.get("이름(KR)", ""),
             "이름(RU)": base.get("이름(RU)", ""),
             "출결여부": base.get("출결여부", ""),
+            "총납부율": total_rate,
+            "6개월 납부율": six_rate,
         }
-        
+
         for m in months:
             m_data = monthly.get(m, {})
             row[f"{m}월 십일조"] = m_data.get("tithe", "")
             row[f"{m}월 메모"] = m_data.get("memo", "")
-            
+
         rows.append(row)
 
     columns = [
-        "고유번호", "지역", "팀", "구역", "부서", "이름(KR)", "이름(RU)", "출결여부"
+        "고유번호", "지역", "팀", "구역", "부서", "이름(KR)", "이름(RU)", "출결여부", "총납부율", "6개월 납부율"
     ]
     for m in months:
         columns.append(f"{m}월 십일조")
