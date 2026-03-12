@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """File generation UI."""
 from __future__ import annotations
 
@@ -223,10 +223,13 @@ def _render_domestic_text(standardized_df: pd.DataFrame) -> None:
     domestic_df = standardized_df[standardized_df["지역"].astype(str).str.contains("국내", na=False)].copy()
     if generate_domestic:
         header_text = (domestic_header or "").strip()
-        normalize_area = lambda value: re.sub(r"\s+", "", str(value))
-        adult_text = build_domestic_text(domestic_df, {r"청장"}, header_text, "💙")
-        women_text = build_domestic_text(domestic_df, {r"^[1-5]구역$", r"^신유구역$"}, header_text, "💖")
-        youth_text = build_domestic_text(domestic_df, {r"청(?!장).*구역"}, header_text, "💛")
+        adult_df = domestic_df[domestic_df["부서"].astype(str).str.contains("장년", na=False)].copy()
+        women_df = domestic_df[domestic_df["부서"].astype(str).str.contains("부녀", na=False)].copy()
+        youth_df = domestic_df[domestic_df["부서"].astype(str).str.contains("청년", na=False)].copy()
+        
+        adult_text = build_domestic_text(adult_df, {r".*"}, header_text, "💙")
+        women_text = build_domestic_text(women_df, {r".*"}, header_text, "💖")
+        youth_text = build_domestic_text(youth_df, {r".*"}, header_text, "💛")
         col_a, col_b, col_c = st.columns(3)
         with col_a:
             st.subheader("청장년부")
