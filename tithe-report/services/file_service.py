@@ -43,11 +43,6 @@ def load_header_presets() -> Dict[str, str]:
             for key in presets:
                 if isinstance(data.get(key), str):
                     presets[key] = data[key]
-            legacy_fee = data.get("회비")
-            if isinstance(legacy_fee, str):
-                for key in ("회비-청장년", "회비-부녀", "회비-청년"):
-                    if not presets.get(key):
-                        presets[key] = legacy_fee
         return presets
     except (FileNotFoundError, json.JSONDecodeError, OSError, IOError):
         return DEFAULT_HEADER_PRESETS.copy()

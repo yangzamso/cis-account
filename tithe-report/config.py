@@ -10,9 +10,6 @@ HEADER_PRESET_FILE = "domestic_header_presets.json"
 DEFAULT_HEADER_PRESETS = {
     "기타": "",
     "십일조": "",
-    "회비-청장년": "",
-    "회비-부녀": "",
-    "회비-청년": "",
 }
 
 NAME_KR_WIDTH = 25

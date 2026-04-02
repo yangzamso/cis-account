@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """File generation UI."""
 from __future__ import annotations
 
@@ -199,7 +199,7 @@ def _render_overseas_download(source_df: pd.DataFrame, yy_mm: str, year_value: i
 def _render_domestic_text(standardized_df: pd.DataFrame) -> None:
     st.subheader("보고 자료 텍스트 생성")
     presets = load_header_presets()
-    preset_choice = st.radio("머리글 기본값", ["기타", "십일조", "회비-청장년", "회비-부녀", "회비-청년"], horizontal=True, key="domestic_header_preset")
+    preset_choice = st.radio("머리글 기본값", ["기타", "십일조"], horizontal=True, key="domestic_header_preset")
     if "domestic_header_text" not in st.session_state:
         st.session_state["domestic_header_text"] = presets.get(preset_choice, "")
     if "domestic_header_preset_last" not in st.session_state:
@@ -223,10 +223,13 @@ def _render_domestic_text(standardized_df: pd.DataFrame) -> None:
     domestic_df = standardized_df[standardized_df["지역"].astype(str).str.contains("국내", na=False)].copy()
     if generate_domestic:
         header_text = (domestic_header or "").strip()
-        normalize_area = lambda value: re.sub(r"\s+", "", str(value))
-        adult_text = build_domestic_text(domestic_df, {r"청장"}, header_text, "💙")
-        women_text = build_domestic_text(domestic_df, {r"^[1-5]구역$", r"^신유구역$"}, header_text, "💖")
-        youth_text = build_domestic_text(domestic_df, {r"청(?!장).*구역"}, header_text, "💛")
+        adult_df = domestic_df[domestic_df["부서"].astype(str).str.contains("장년", na=False)].copy()
+        women_df = domestic_df[domestic_df["부서"].astype(str).str.contains("부녀|자문", na=False)].copy()
+        youth_df = domestic_df[domestic_df["부서"].astype(str).str.contains("청년", na=False)].copy()
+        
+        adult_text = build_domestic_text(adult_df, {r".*"}, header_text, "💙")
+        women_text = build_domestic_text(women_df, {r".*"}, header_text, "💖")
+        youth_text = build_domestic_text(youth_df, {r".*"}, header_text, "💛")
         col_a, col_b, col_c = st.columns(3)
         with col_a:
             st.subheader("청장년부")
