@@ -19,6 +19,8 @@ steps:
       - '--platform'
       - 'managed'
       - '--allow-unauthenticated'
+      - '--service-account'
+      - 'google-drive-downloder@cis-account-486000.iam.gserviceaccount.com'
 
 images:
   - 'gcr.io/$PROJECT_ID/tithe-report'
